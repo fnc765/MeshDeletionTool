@@ -3,6 +3,7 @@
 "MeshDeletionTool"はUnityで動作するメッシュ一部削除を目的としたエディタ拡張<br>
 透明シェーダーが使えない環境にて透明テクスチャを用いて表現されているモデルに対して、
 テクスチャ外形をベースにメッシュを加工し、透明部分を削除する<br>
+**本リポジトリは上記機能実装に向けた各機能の勉強用として実装したコードを保存するために使用する**<br>
 開発のきっかけとしてはVroidをQuest対応させるための海苔現象に対処するため<br>
 
 # Functions list
@@ -40,8 +41,5 @@ git clone https://github.com/fnc765/MeshDeletionTool.git
 * https://twitter.com/ochoco0215
 
 # License
-
-プロプライエタリ・ソフトウェアとして管理する<br>
-（将来的にboothでの販売を目的として開発する）
-
-"MeshDeletionTool" is Confidential.
+ 
+"MeshDeletionTools" is under [MIT license](https://en.wikipedia.org/wiki/MIT_License).

@@ -7,7 +7,7 @@ namespace MeshGetColorInfo
 {
     public class MeshGetColorInfo : EditorWindow
     {
-        internal GameObject targetObject;
+        internal Renderer targetRenderer;
         internal int vertexIndex = 0;
 
         [MenuItem("Tools/MeshGetColorInfo")]
@@ -22,7 +22,7 @@ namespace MeshGetColorInfo
         {
             GUILayout.Label("オブジェクトを選択", EditorStyles.boldLabel);
 
-            targetObject = EditorGUILayout.ObjectField("対象オブジェクト", targetObject, typeof(GameObject), true) as GameObject;
+            targetRenderer = EditorGUILayout.ObjectField("対象オブジェクト", targetRenderer, typeof(Renderer), true) as Renderer;
 
             vertexIndex = EditorGUILayout.IntField("頂点番号", vertexIndex);
 
@@ -34,20 +34,36 @@ namespace MeshGetColorInfo
 
         private void GetColorInMeshes()
         {
-            if (targetObject == null)
+            if (targetRenderer == null)
             {
                 Debug.LogError("対象オブジェクトが選択されていません！");
                 return;
             }
 
-            SkinnedMeshRenderer skinnedMeshRenderer = targetObject.GetComponent<SkinnedMeshRenderer>();
-            if (skinnedMeshRenderer == null || skinnedMeshRenderer.sharedMesh == null)
+            Mesh mesh = null;
+            Material[] materials = null;
+
+            if (targetRenderer is SkinnedMeshRenderer skinnedMeshRenderer)
             {
-                Debug.LogError("対象オブジェクトに有効な SkinnedMeshRenderer コンポーネントがありません！");
+                mesh = skinnedMeshRenderer.sharedMesh;
+                materials = skinnedMeshRenderer.sharedMaterials;
+            }
+            else if (targetRenderer is MeshRenderer meshRenderer)
+            {
+                MeshFilter meshFilter = targetRenderer.GetComponent<MeshFilter>();
+                if (meshFilter != null)
+                {
+                    mesh = meshFilter.sharedMesh;
+                    materials = meshRenderer.sharedMaterials;
+                }
+            }
+
+            if (mesh == null)
+            {
+                Debug.LogError("対象オブジェクトに有効な SkinnedMeshRenderer または MeshRenderer コンポーネントがありません！");
                 return;
             }
 
-            Material[] materials = skinnedMeshRenderer.sharedMaterials;
             for (int i = 0; i < materials.Length; i++)
             {
                 Texture2D texture = materials[i].mainTexture as Texture2D;
@@ -57,7 +73,7 @@ namespace MeshGetColorInfo
                     continue;
                 }
 
-                Vector2[] uv = skinnedMeshRenderer.sharedMesh.uv;
+                Vector2[] uv = mesh.uv;
                 if (vertexIndex < 0 || vertexIndex >= uv.Length)
                 {
                     Debug.LogError("指定された頂点番号が無効です。");

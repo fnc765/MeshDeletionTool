@@ -6,9 +6,8 @@ namespace MeshDeletionToolForBox
 {
     public class MeshDeletionToolForBox : EditorWindow
     {
-        private GameObject targetObject;
+        internal Renderer targetRenderer;
         private GameObject deletionBoundsObject;
-        private MeshFilter meshFilter;
 
         [MenuItem("Tools/MeshDeletionToolForBox")]
         private static void Init()
@@ -22,7 +21,7 @@ namespace MeshDeletionToolForBox
         {
             GUILayout.Label("オブジェクトと削除範囲を選択", EditorStyles.boldLabel);
 
-            targetObject = EditorGUILayout.ObjectField("対象オブジェクト", targetObject, typeof(GameObject), true) as GameObject;
+            targetRenderer = EditorGUILayout.ObjectField("対象オブジェクト", targetRenderer, typeof(Renderer), true) as Renderer;
             deletionBoundsObject = EditorGUILayout.ObjectField("削除範囲オブジェクト", deletionBoundsObject, typeof(GameObject), true) as GameObject;
 
             if (GUILayout.Button("削除範囲内のメッシュを削除"))
@@ -33,7 +32,7 @@ namespace MeshDeletionToolForBox
 
         private void DeleteMeshesInBounds()
         {
-            if (targetObject == null)
+            if (targetRenderer == null)
             {
                 Debug.LogError("対象オブジェクトが選択されていません！");
                 return;
@@ -48,14 +47,26 @@ namespace MeshDeletionToolForBox
             // 削除範囲オブジェクトから境界ボックスを取得
             Bounds deletionBounds = GetObjectBounds(deletionBoundsObject);
             
-            SkinnedMeshRenderer skinnedMeshRenderer = targetObject.GetComponent<SkinnedMeshRenderer>();
-            if (skinnedMeshRenderer == null || skinnedMeshRenderer.sharedMesh == null)
+
+            Mesh originalMesh = null;
+            if (targetRenderer is SkinnedMeshRenderer skinnedMeshRenderer)
             {
-                Debug.LogError("対象オブジェクトに有効な SkinnedMeshRenderer コンポーネントがありません！");
-                return;
+                originalMesh = skinnedMeshRenderer.sharedMesh;
+            }
+            else if (targetRenderer is MeshRenderer meshRenderer)
+            {
+                MeshFilter meshFilter = targetRenderer.GetComponent<MeshFilter>();
+                if (meshFilter != null)
+                {
+                    originalMesh = meshFilter.sharedMesh;
+                }
             }
 
-            Mesh originalMesh = skinnedMeshRenderer.sharedMesh;
+            if (originalMesh == null)
+            {
+                Debug.LogError("対象オブジェクトに有効な SkinnedMeshRenderer または MeshRenderer コンポーネントがありません！");
+                return;
+            }
 
             List<int> removeVerticesIndexs = new List<int>();
             List<Vector3> newVerticesList = new List<Vector3>();
@@ -69,7 +80,7 @@ namespace MeshDeletionToolForBox
 
             // 削除する頂点のindex番号のリスト
             for (int index = 0; index < originalMesh.vertices.Length; index++) {
-                Vector3 verticesWorldPoints = targetObject.transform.TransformPoint(originalMesh.vertices[index]);
+                Vector3 verticesWorldPoints = targetRenderer.transform.TransformPoint(originalMesh.vertices[index]);
                 if (deletionBounds.Contains(verticesWorldPoints) ) {
                     removeVerticesIndexs.Add(index);
                 }

@@ -80,7 +80,7 @@ namespace MeshGetColorInfo
                     return;
                 }
 
-                Vector2 pixelUV = new Vector2(uv[vertexIndex].x * texture.width, uv[vertexIndex].y * texture.height);
+                Vector2 pixelUV = new Vector2(uv[vertexIndex].x * (texture.width - 1), uv[vertexIndex].y * (texture.height - 1));
                 Color vertexColor = texture.GetPixel((int)pixelUV.x, (int)pixelUV.y);
 
                 Debug.Log($"サブメッシュ {i} の頂点 {vertexIndex} のテクスチャRGB値: {vertexColor}, ピクセル座標: ({pixelUV.x:F1}, {pixelUV.y:F1})");

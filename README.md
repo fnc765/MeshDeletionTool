@@ -9,7 +9,9 @@
 # Functions list
  
 * ***MeshDeletionToolForBox***<br>
+***MeshDeletionTool***<br>
 ボックスオブジェクトと削除対象オブジェクトを指定することでボックスオブジェクトに重なったメッシュを削除する
+MeshDeletionToolはMeshDeletionToolForBoxをリファクタリングしたコードで処理内容は同一（UV2~4や頂点カラーに対応している）
 
 * ***MeshGetColorInfo***<br>
 対象オブジェクトを指定することで、そのオブジェクトに含まれる各サブメッシュ毎に指定した頂点番号のテクスチャRGBA値をLogに出力する

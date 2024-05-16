@@ -30,6 +30,11 @@ namespace MeshGetColorInfo
             {
                 GetColorInMeshes();
             }
+
+            if (GUILayout.Button("テストオブジェクトの生成"))
+            {
+                MakeTestObject();
+            }
         }
 
         private void GetColorInMeshes()
@@ -85,6 +90,72 @@ namespace MeshGetColorInfo
 
                 Debug.Log($"サブメッシュ {i} の頂点 {vertexIndex} のテクスチャRGB値: {vertexColor}, ピクセル座標: ({pixelUV.x:F1}, {pixelUV.y:F1})");
             }
+        }
+
+        private void MakeTestObject()
+        {
+            /*
+            2(blue)   3(white)
+                ┌────┐
+                │    │
+                └────┘
+            0(red)    1(green)
+            */
+            GameObject testObject = new GameObject("TestObject");
+            var meshRenderer = testObject.AddComponent<MeshRenderer>();
+            var meshFilter = testObject.AddComponent<MeshFilter>();
+            var mesh = new Mesh();
+
+            // 頂点座標を四角形として設定
+            mesh.vertices = new Vector3[]
+            {
+                new Vector3(0, 0, 0), // 0
+                new Vector3(1, 0, 0), // 1
+                new Vector3(0, 1, 0), // 2
+                new Vector3(1, 1, 0)  // 3
+            };
+
+            // UV 座標を設定
+            mesh.uv = new Vector2[]
+            {
+                new Vector2(0, 0), // 0
+                new Vector2(1, 0), // 1
+                new Vector2(0, 1), // 2
+                new Vector2(1, 1)  // 3
+            };
+
+            // 四角形を2つの三角形として設定
+            mesh.triangles = new int[]
+            {
+                0, 1, 2, // 第1三角形
+                2, 1, 3  // 第2三角形
+            };
+
+            meshFilter.sharedMesh = mesh;
+
+            Texture2D testTexture = new Texture2D(2, 2);
+            testTexture.SetPixel(0, 0, Color.red);
+            testTexture.SetPixel(1, 0, Color.green);
+            testTexture.SetPixel(0, 1, Color.blue);
+            testTexture.SetPixel(1, 1, Color.white);
+            testTexture.Apply();
+
+            var material = new Material(Shader.Find("Standard"));
+            material.mainTexture = testTexture;
+            meshRenderer.sharedMaterial = material;
+
+            var path = "Assets/TestTexture.png";
+            File.WriteAllBytes(path, testTexture.EncodeToPNG());
+            AssetDatabase.ImportAsset(path);
+            var textureImporter = AssetImporter.GetAtPath(path) as TextureImporter;
+            textureImporter.isReadable = true;
+            AssetDatabase.ImportAsset(path, ImportAssetOptions.ForceUpdate);
+
+            testTexture = AssetDatabase.LoadAssetAtPath<Texture2D>(path);
+            material.mainTexture = testTexture;
+
+            // テストオブジェクトを選択してシーンに表示
+            Selection.activeGameObject = testObject;
         }
     }
 }

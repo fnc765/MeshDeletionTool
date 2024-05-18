@@ -9,11 +9,11 @@ namespace MeshDeletionTool
         internal Renderer targetRenderer;
         private GameObject deletionBoundsObject;
 
-        [MenuItem("Tools/MeshDeletionTool")]
+        [MenuItem("Tools/MeshDeletionToolForBox")]
         private static void Init()
         {
-            MeshDeletionTool window = (MeshDeletionTool)EditorWindow.GetWindow(typeof(MeshDeletionTool));
-            window.titleContent = new GUIContent("MeshDeletionTool");
+            MeshDeletionToolForBox window = (MeshDeletionToolForBox)EditorWindow.GetWindow(typeof(MeshDeletionToolForBox));
+            window.titleContent = new GUIContent("MeshDeletionToolForBox");
             window.Show();
         }
 

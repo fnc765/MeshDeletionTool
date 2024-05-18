@@ -6,63 +6,7 @@ namespace MeshDeletionTool
 {
     public class MeshDeletionTool : EditorWindow
     {
-        internal Renderer targetRenderer;
-        private GameObject deletionBoundsObject;
-
-        [MenuItem("Tools/MeshDeletionTool")]
-        private static void Init()
-        {
-            MeshDeletionTool window = (MeshDeletionTool)EditorWindow.GetWindow(typeof(MeshDeletionTool));
-            window.titleContent = new GUIContent("MeshDeletionTool");
-            window.Show();
-        }
-
-        private void OnGUI()
-        {
-            GUILayout.Label("オブジェクトと削除範囲を選択", EditorStyles.boldLabel);
-
-            targetRenderer = EditorGUILayout.ObjectField("対象オブジェクト", targetRenderer, typeof(Renderer), true) as Renderer;
-            deletionBoundsObject = EditorGUILayout.ObjectField("削除範囲オブジェクト", deletionBoundsObject, typeof(GameObject), true) as GameObject;
-
-            if (GUILayout.Button("削除範囲内のメッシュを削除"))
-            {
-                DeleteMeshesInBounds();
-            }
-        }
-
-        private void DeleteMeshesInBounds()
-        {
-            if (!ValidateInputs())
-                return;
-
-            Bounds deletionBounds = GetObjectBounds(deletionBoundsObject);
-            Mesh originalMesh = GetOriginalMesh();
-            if (originalMesh == null)
-                return;
-
-            List<int> removeVerticesIndexs = GetVerticesToRemove(originalMesh, deletionBounds);
-            Mesh newMesh = CreateMeshAfterVertexRemoval(originalMesh, removeVerticesIndexs);
-            SaveNewMesh(newMesh);
-        }
-
-        private bool ValidateInputs()
-        {
-            if (targetRenderer == null)
-            {
-                Debug.LogError("対象オブジェクトが選択されていません！");
-                return false;
-            }
-
-            if (deletionBoundsObject == null)
-            {
-                Debug.LogError("削除範囲オブジェクトが選択されていません！");
-                return false;
-            }
-
-            return true;
-        }
-
-        private Mesh GetOriginalMesh()
+        protected Mesh GetOriginalMesh(Renderer targetRenderer)
         {
             if (targetRenderer is SkinnedMeshRenderer skinnedMeshRenderer)
             {
@@ -81,7 +25,7 @@ namespace MeshDeletionTool
             return null;
         }
 
-        private List<int> GetVerticesToRemove(Mesh originalMesh, Bounds deletionBounds)
+        protected List<int> GetVerticesToRemove(Renderer targetRenderer, Mesh originalMesh, Bounds deletionBounds)
         {
             List<int> removeVerticesIndexs = new List<int>();
 
@@ -98,7 +42,7 @@ namespace MeshDeletionTool
             return removeVerticesIndexs;
         }
 
-        private Mesh CreateMeshAfterVertexRemoval(Mesh originalMesh, List<int> removeVerticesIndexs)
+        protected Mesh CreateMeshAfterVertexRemoval(Mesh originalMesh, List<int> removeVerticesIndexs)
         {
             MeshData newMeshData = new MeshData();
             RemoveVerticesDatas(originalMesh, removeVerticesIndexs, newMeshData);
@@ -126,7 +70,7 @@ namespace MeshDeletionTool
             return newMesh;
         }
 
-        private void RemoveVerticesDatas(Mesh originalMesh, List<int> removeVerticesIndexs, MeshData newMeshData)
+        protected void RemoveVerticesDatas(Mesh originalMesh, List<int> removeVerticesIndexs, MeshData newMeshData)
         {
             for (int index = 0; index < originalMesh.vertices.Length; index++)
             {
@@ -154,7 +98,7 @@ namespace MeshDeletionTool
             }
         }
 
-        private void RemoveTriangles(Mesh originalMesh, List<int> removeVerticesIndexs, List<Vector3> newVerticesList, List<int> newTrianglesList)
+        protected void RemoveTriangles(Mesh originalMesh, List<int> removeVerticesIndexs, List<Vector3> newVerticesList, List<int> newTrianglesList)
         {
             for (int index = 0; index < originalMesh.triangles.Length; index += 3)
             {
@@ -177,7 +121,7 @@ namespace MeshDeletionTool
             }
         }
 
-        private void RemoveSubMeshes(Mesh originalMesh, List<int> removeVerticesIndexs, List<Vector3> newVerticesList, Mesh newMesh)
+        protected void RemoveSubMeshes(Mesh originalMesh, List<int> removeVerticesIndexs, List<Vector3> newVerticesList, Mesh newMesh)
         {
             int subMeshCount = originalMesh.subMeshCount;
             newMesh.subMeshCount = subMeshCount;
@@ -214,7 +158,7 @@ namespace MeshDeletionTool
             }
         }
 
-        private void RemoveBlendShapes(Mesh originalMesh, List<int> removeVerticesIndexs, Mesh newMesh)
+        protected void RemoveBlendShapes(Mesh originalMesh, List<int> removeVerticesIndexs, Mesh newMesh)
         {
             for (int i = 0; i < originalMesh.blendShapeCount; i++)
             {
@@ -245,13 +189,13 @@ namespace MeshDeletionTool
             }
         }
 
-        private void SaveNewMesh(Mesh newMesh)
+        protected void SaveNewMesh(Mesh newMesh)
         {
             AssetDatabase.CreateAsset(newMesh, "Assets/NewMesh.asset");
             AssetDatabase.SaveAssets();
         }
 
-        private Bounds GetObjectBounds(GameObject obj)
+        protected Bounds GetObjectBounds(GameObject obj)
         {
             Renderer[] renderers = obj.GetComponentsInChildren<Renderer>();
             Bounds bounds = new Bounds();
@@ -276,7 +220,7 @@ namespace MeshDeletionTool
             return bounds;
         }
 
-        private class MeshData
+        protected class MeshData
         {
             public List<Vector3> Vertices { get; set; } = new List<Vector3>();
             public List<Vector3> Normals { get; set; } = new List<Vector3>();

@@ -25,6 +25,25 @@ namespace MeshDeletionTool
             return null;
         }
 
+        protected Material[] GetOriginalMaterials(Renderer targetRenderer)
+        {
+            if (targetRenderer is SkinnedMeshRenderer skinnedMeshRenderer)
+            {
+                return skinnedMeshRenderer.sharedMaterials;
+            }
+            else if (targetRenderer is MeshRenderer meshRenderer)
+            {
+                MeshFilter meshFilter = targetRenderer.GetComponent<MeshFilter>();
+                if (meshFilter != null)
+                {
+                    return meshRenderer.sharedMaterials;
+                }
+            }
+
+            Debug.LogError("対象オブジェクトに有効な SkinnedMeshRenderer または MeshRenderer コンポーネントがありません！");
+            return null;
+        }
+
         protected List<int> GetVerticesToRemove(Renderer targetRenderer, Mesh originalMesh, Bounds deletionBounds)
         {
             List<int> removeVerticesIndexs = new List<int>();
@@ -72,29 +91,46 @@ namespace MeshDeletionTool
 
         protected void RemoveVerticesDatas(Mesh originalMesh, List<int> removeVerticesIndexs, MeshData newMeshData)
         {
-            for (int index = 0; index < originalMesh.vertices.Length; index++)
-            {
-                if (removeVerticesIndexs.Contains(index))
-                    continue;
-                
-                newMeshData.Vertices.Add(originalMesh.vertices[index]);
-                newMeshData.Normals.Add(originalMesh.normals[index]);
-                newMeshData.Tangents.Add(originalMesh.tangents[index]);
-                newMeshData.UV.Add(originalMesh.uv[index]);
+            HashSet<int> removeVerticesIndexsSet = new HashSet<int>(removeVerticesIndexs);
 
-                if (originalMesh.uv2.Length > index)
+            int verticesLength = originalMesh.vertices.Length;
+            int normalsLength = originalMesh.normals.Length;
+            int tangentsLength = originalMesh.tangents.Length;
+            int uvLength = originalMesh.uv.Length;
+            int uv2Length = originalMesh.uv2.Length;
+            int uv3Length = originalMesh.uv3.Length;
+            int uv4Length = originalMesh.uv4.Length;
+            int colorsLength = originalMesh.colors.Length;
+            int colors32Length = originalMesh.colors32.Length;
+            int boneWeightsLength = originalMesh.boneWeights.Length;
+
+            for (int index = 0; index < verticesLength; index++)
+            {
+                if (removeVerticesIndexsSet.Contains(index))
+                    continue;
+
+                newMeshData.Vertices.Add(originalMesh.vertices[index]);
+                if (normalsLength > index)
+                    newMeshData.Normals.Add(originalMesh.normals[index]);
+                if (tangentsLength > index)
+                    newMeshData.Tangents.Add(originalMesh.tangents[index]);
+
+                if (uvLength > index)
+                    newMeshData.UV.Add(originalMesh.uv[index]);
+                if (uv2Length > index)
                     newMeshData.UV2.Add(originalMesh.uv2[index]);
-                if (originalMesh.uv3.Length > index)
+                if (uv3Length > index)
                     newMeshData.UV3.Add(originalMesh.uv3[index]);
-                if (originalMesh.uv4.Length > index)
+                if (uv4Length > index)
                     newMeshData.UV4.Add(originalMesh.uv4[index]);
 
-                if (originalMesh.colors.Length > index)
+                if (colorsLength > index)
                     newMeshData.Colors.Add(originalMesh.colors[index]);
-                if (originalMesh.colors32.Length > index)
+                if (colors32Length > index)
                     newMeshData.Colors32.Add(originalMesh.colors32[index]);
 
-                newMeshData.BoneWeights.Add(originalMesh.boneWeights[index]);
+                if (boneWeightsLength > index)
+                    newMeshData.BoneWeights.Add(originalMesh.boneWeights[index]);
             }
         }
 

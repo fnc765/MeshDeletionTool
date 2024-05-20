@@ -220,41 +220,11 @@ namespace MeshDeletionTool
 
         private int AddEdgeIntersectionPoints(Texture2D texture, List<Vector3> vertices, List<Vector2> uvs, Dictionary<Vector2, int> verticesMap, Vector3 p1, Vector3 p2, Vector2 uv1, Vector2 uv2)
         {
-            // UV座標をピクセル座標に変換
-            Vector2 pixelUV1 = new Vector2(uv1.x * (texture.width - 1), uv1.y * (texture.height - 1));
-            Vector2 pixelUV2 = new Vector2(uv2.x * (texture.width - 1), uv2.y * (texture.height - 1));
-
-            // 各ピクセルの色を取得
-            Color color1 = texture.GetPixel((int)pixelUV1.x, (int)pixelUV1.y);
-            Color color2 = texture.GetPixel((int)pixelUV2.x, (int)pixelUV2.y);
-
-            // 境界エッジであるかどうかを判定
-            if ((color1.a == 0 && color2.a != 0) || (color1.a != 0 && color2.a == 0))
+            // 境界エッジかどうかを判定
+            if (IsBoundaryEdge(texture, uv1, uv2))
             {
-                // 透明・非透明が切り替わる座標を見つけるための二分探索
-                for (int i = 0; i < 10; i++)
-                {
-                    float t = 0.5f;
-                    Vector2 midUV = Vector2.Lerp(uv1, uv2, t);
-                    Vector2 midPixelUV = new Vector2(midUV.x * (texture.width - 1), midUV.y * (texture.height - 1));
-                    Color midColor = texture.GetPixel((int)midPixelUV.x, (int)midPixelUV.y);
-                    Vector3 midVertex = Vector3.Lerp(p1, p2, t);
-
-                    if ((color1.a == 0 && midColor.a != 0) || (color1.a != 0 && midColor.a == 0))
-                    {
-                        uv2 = midUV;
-                        p2 = midVertex;
-                    }
-                    else
-                    {
-                        uv1 = midUV;
-                        color1 = midColor;
-                        p1 = midVertex;
-                    }
-                }
-
-                Vector2 finalUV = Vector2.Lerp(uv1, uv2, 0.5f);
-                Vector3 newVertex = Vector3.Lerp(p1, p2, 0.5f);
+                // 透明・非透明が切り替わる座標を見つける
+                (Vector2 finalUV, Vector3 newVertex) = FindAlphaBoundary(texture, uv1, uv2, p1, p2);
 
                 // すでに存在するかチェック
                 if (!verticesMap.TryGetValue(finalUV, out int newIndex))
@@ -271,6 +241,52 @@ namespace MeshDeletionTool
 
             // 境界エッジでない場合は-1を返す
             return -1;
+        }
+
+        private bool IsBoundaryEdge(Texture2D texture, Vector2 uv1, Vector2 uv2)
+        {
+            // UV座標をピクセル座標に変換
+            Vector2 pixelUV1 = new Vector2(uv1.x * (texture.width - 1), uv1.y * (texture.height - 1));
+            Vector2 pixelUV2 = new Vector2(uv2.x * (texture.width - 1), uv2.y * (texture.height - 1));
+
+            // 各ピクセルの色を取得
+            Color color1 = texture.GetPixel((int)pixelUV1.x, (int)pixelUV1.y);
+            Color color2 = texture.GetPixel((int)pixelUV2.x, (int)pixelUV2.y);
+
+            // 片方のピクセルが透明で、もう片方が透明でない場合は境界エッジと判定
+            return (color1.a == 0 && color2.a != 0) || (color1.a != 0 && color2.a == 0);
+        }
+
+        private (Vector2 uv, Vector3 vertex) FindAlphaBoundary(Texture2D texture, Vector2 uv1, Vector2 uv2, Vector3 p1, Vector3 p2)
+        {
+            Vector2 pixelUV1 = new Vector2(uv1.x * (texture.width - 1), uv1.y * (texture.height - 1));
+            Color color1 = texture.GetPixel((int)pixelUV1.x, (int)pixelUV1.y);
+
+            // 透明・非透明が切り替わる座標を見つけるための二分探索
+            for (int i = 0; i < 10; i++)
+            {
+                float t = 0.5f;
+                Vector2 midUV = Vector2.Lerp(uv1, uv2, t);
+                Vector2 midPixelUV = new Vector2(midUV.x * (texture.width - 1), midUV.y * (texture.height - 1));
+                Color midColor = texture.GetPixel((int)midPixelUV.x, (int)midPixelUV.y);
+                Vector3 midVertex = Vector3.Lerp(p1, p2, t);
+
+                if ((color1.a == 0 && midColor.a != 0) || (color1.a != 0 && midColor.a == 0))
+                {
+                    uv2 = midUV;
+                    p2 = midVertex;
+                }
+                else
+                {
+                    uv1 = midUV;
+                    color1 = midColor;
+                    p1 = midVertex;
+                }
+            }
+
+            Vector2 finalUV = Vector2.Lerp(uv1, uv2, 0.5f);
+            Vector3 finalVertex = Vector3.Lerp(p1, p2, 0.5f);
+            return (finalUV, finalVertex);
         }
     }
 }

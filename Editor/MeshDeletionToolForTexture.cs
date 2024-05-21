@@ -122,16 +122,16 @@ namespace MeshDeletionTool
             return removeVerticesIndexs;
         }
 
-        // 削除対象の頂点を除去した新しいメッシュを作成するメソッド
         private Mesh CreateMeshAfterVertexModification(Mesh originalMesh, Material[] originalMaterials, List<int> removeVerticesIndexs)
         {
-            List<Vector3> newVertices = new List<Vector3>(originalMesh.vertices);
-            List<Vector2> newUVs = new List<Vector2>(originalMesh.uv);
+            List<Vector3> newVertices = new List<Vector3>();
+            List<Vector2> newUVs = new List<Vector2>();
             List<int> newTriangles = new List<int>();
 
             Dictionary<Vector2, int> newVerticesMap = new Dictionary<Vector2, int>();
 
             int subMeshCount = originalMesh.subMeshCount;
+
             // サブメッシュ毎に三角ポリゴンを処理する
             for (int subMeshIndex = 0; subMeshIndex < subMeshCount; subMeshIndex++)
             {
@@ -144,65 +144,95 @@ namespace MeshDeletionTool
                     int v2 = triangles[i + 1];
                     int v3 = triangles[i + 2];
 
-                    if (removeVerticesIndexs.Contains(v1) || removeVerticesIndexs.Contains(v2) || removeVerticesIndexs.Contains(v3))
-                    {
-                        Vector3 p1 = originalMesh.vertices[v1]; // オリジナルメッシュの座標取得
-                        Vector3 p2 = originalMesh.vertices[v2];
-                        Vector3 p3 = originalMesh.vertices[v3];
+                    bool v1Removed = removeVerticesIndexs.Contains(v1);
+                    bool v2Removed = removeVerticesIndexs.Contains(v2);
+                    bool v3Removed = removeVerticesIndexs.Contains(v3);
 
-                        Vector2 uv1 = originalMesh.uv[v1]; // オリジナルメッシュのUV取得
-                        Vector2 uv2 = originalMesh.uv[v2];
-                        Vector2 uv3 = originalMesh.uv[v3];
+                    // 全ての頂点が削除対象の場合、三角形を追加しない
+                    if (v1Removed && v2Removed && v3Removed)
+                    {
+                        continue;
+                    }
+                    // いずれの頂点も削除対象でない場合、三角形をそのまま追加
+                    else if (!v1Removed && !v2Removed && !v3Removed)
+                    {
+                        newTriangles.Add(v1);
+                        newTriangles.Add(v2);
+                        newTriangles.Add(v3);
+                    }
+                    // 一部の頂点が削除対象の場合
+                    else
+                    {
+                        List<Vector3> polygonVertices = new List<Vector3>();
+                        List<Vector2> polygonUVs = new List<Vector2>();
+
+                        if (!v1Removed)
+                        {
+                            polygonVertices.Add(originalMesh.vertices[v1]);
+                            polygonUVs.Add(originalMesh.uv[v1]);
+                        }
+                        if (!v2Removed)
+                        {
+                            polygonVertices.Add(originalMesh.vertices[v2]);
+                            polygonUVs.Add(originalMesh.uv[v2]);
+                        }
+                        if (!v3Removed)
+                        {
+                            polygonVertices.Add(originalMesh.vertices[v3]);
+                            polygonUVs.Add(originalMesh.uv[v3]);
+                        }
 
                         Material material = originalMaterials[subMeshIndex];
                         Texture2D texture = material.mainTexture as Texture2D;
 
                         if (texture != null)
                         {
-                            // エッジの交差点を追加
-                            int newV1 = AddEdgeIntersectionPoints(texture, newVertices, newUVs, newVerticesMap, p1, p2, uv1, uv2);
-                            int newV2 = AddEdgeIntersectionPoints(texture, newVertices, newUVs, newVerticesMap, p2, p3, uv2, uv3);
-                            int newV3 = AddEdgeIntersectionPoints(texture, newVertices, newUVs, newVerticesMap, p3, p1, uv3, uv1);
+                            Vector3? intersection1 = AddEdgeIntersectionPoints(texture, originalMesh.vertices[v1], originalMesh.vertices[v2], originalMesh.uv[v1], originalMesh.uv[v2]);
+                            Vector3? intersection2 = AddEdgeIntersectionPoints(texture, originalMesh.vertices[v2], originalMesh.vertices[v3], originalMesh.uv[v2], originalMesh.uv[v3]);
+                            Vector3? intersection3 = AddEdgeIntersectionPoints(texture, originalMesh.vertices[v3], originalMesh.vertices[v1], originalMesh.uv[v3], originalMesh.uv[v1]);
 
-                            // 新しい三角形を追加
-                            if (newV1 != -1 && newV2 != -1) //newV3の辺は新しい頂点がない＝その辺はどちらも消えない頂点
+                            if (intersection1.HasValue) 
                             {
-                                newTriangles.Add(v1);
-                                newTriangles.Add(newV1);   //三角ポリゴンの真ん中はクロスするため、もう一つの三角ポリゴンには使わない
-                                newTriangles.Add(newV2);
-
-                                newTriangles.Add(newV2);
-                                newTriangles.Add(v3);
-                                newTriangles.Add(v1);
+                                polygonVertices.Add(intersection1.Value);
+                                polygonUVs.Add(Vector2.Lerp(originalMesh.uv[v1], originalMesh.uv[v2], 0.5f));  // UVも追加
                             }
-                            if (newV2 != -1 && newV3 != -1) //newV1に指定した頂点はどちらも有効
+                            if (intersection2.HasValue)
                             {
-                                newTriangles.Add(v2);
-                                newTriangles.Add(newV2);
-                                newTriangles.Add(newV3);
-
-                                newTriangles.Add(newV3);
-                                newTriangles.Add(v1);
-                                newTriangles.Add(v2);
+                                polygonVertices.Add(intersection2.Value);
+                                polygonUVs.Add(Vector2.Lerp(originalMesh.uv[v2], originalMesh.uv[v3], 0.5f));  // UVも追加
                             }
-                            if (newV3 != -1 && newV1 != -1)
+                            if (intersection3.HasValue)
                             {
-                                newTriangles.Add(v3);
-                                newTriangles.Add(newV3);
-                                newTriangles.Add(newV1);
-
-                                newTriangles.Add(newV1);
-                                newTriangles.Add(v2);
-                                newTriangles.Add(v3);
+                                polygonVertices.Add(intersection3.Value);
+                                polygonUVs.Add(Vector2.Lerp(originalMesh.uv[v3], originalMesh.uv[v1], 0.5f));  // UVも追加
                             }
                         }
-                    }
-                    else
-                    {
-                        // 削除対象でない三角形はそのまま追加
-                        newTriangles.Add(v1);
-                        newTriangles.Add(v2);
-                        newTriangles.Add(v3);
+
+                        // 頂点の重複を避けるためにマッピング
+                        Dictionary<Vector3, int> vertexIndexMap = new Dictionary<Vector3, int>();
+                        List<Vector3> uniqueVertices = new List<Vector3>();
+                        List<Vector2> uniqueUVs = new List<Vector2>();
+
+                        for (int j = 0; j < polygonVertices.Count; j++)
+                        {
+                            Vector3 vertex = polygonVertices[j];
+                            Vector2 uv = polygonUVs[j];
+                            if (!vertexIndexMap.ContainsKey(vertex))
+                            {
+                                uniqueVertices.Add(vertex);
+                                uniqueUVs.Add(uv);
+                                vertexIndexMap[vertex] = newVertices.Count;
+                                newVertices.Add(vertex);
+                                newUVs.Add(uv);
+                            }
+                        }
+
+                        int[] triangulatedIndices = EarClipping3D.Triangulate(uniqueVertices.ToArray());
+
+                        for (int j = 0; j < triangulatedIndices.Length; j++)
+                        {
+                            newTriangles.Add(vertexIndexMap[uniqueVertices[triangulatedIndices[j]]]);
+                        }
                     }
                 }
             }
@@ -218,42 +248,25 @@ namespace MeshDeletionTool
             return newMesh;
         }
 
-        private int AddEdgeIntersectionPoints(Texture2D texture, List<Vector3> vertices, List<Vector2> uvs, Dictionary<Vector2, int> verticesMap, Vector3 p1, Vector3 p2, Vector2 uv1, Vector2 uv2)
+        private Vector3? AddEdgeIntersectionPoints(Texture2D texture, Vector3 p1, Vector3 p2, Vector2 uv1, Vector2 uv2)
         {
-            // 境界エッジかどうかを判定
             if (IsBoundaryEdge(texture, uv1, uv2))
             {
-                // 透明・非透明が切り替わる座標を見つける
                 (Vector2 finalUV, Vector3 newVertex) = FindAlphaBoundary(texture, uv1, uv2, p1, p2);
-
-                // すでに存在するかチェック
-                if (!verticesMap.TryGetValue(finalUV, out int newIndex))
-                {
-                    vertices.Add(newVertex);
-                    uvs.Add(finalUV);
-                    newIndex = vertices.Count - 1;
-                    verticesMap[finalUV] = newIndex;
-                }
-
-                // 新しい頂点のインデックスを返す
-                return newIndex;
+                return newVertex;
             }
 
-            // 境界エッジでない場合は-1を返す
-            return -1;
+            return null;
         }
 
         private bool IsBoundaryEdge(Texture2D texture, Vector2 uv1, Vector2 uv2)
         {
-            // UV座標をピクセル座標に変換
             Vector2 pixelUV1 = new Vector2(uv1.x * (texture.width - 1), uv1.y * (texture.height - 1));
             Vector2 pixelUV2 = new Vector2(uv2.x * (texture.width - 1), uv2.y * (texture.height - 1));
 
-            // 各ピクセルの色を取得
             Color color1 = texture.GetPixel((int)pixelUV1.x, (int)pixelUV1.y);
             Color color2 = texture.GetPixel((int)pixelUV2.x, (int)pixelUV2.y);
 
-            // 片方のピクセルが透明で、もう片方が透明でない場合は境界エッジと判定
             return (color1.a == 0 && color2.a != 0) || (color1.a != 0 && color2.a == 0);
         }
 
@@ -262,7 +275,6 @@ namespace MeshDeletionTool
             Vector2 pixelUV1 = new Vector2(uv1.x * (texture.width - 1), uv1.y * (texture.height - 1));
             Color color1 = texture.GetPixel((int)pixelUV1.x, (int)pixelUV1.y);
 
-            // 透明・非透明が切り替わる座標を見つけるための二分探索
             for (int i = 0; i < 10; i++)
             {
                 float t = 0.5f;

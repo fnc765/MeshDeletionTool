@@ -128,8 +128,6 @@ namespace MeshDeletionTool
             List<Vector2> newUVs = new List<Vector2>();
             List<int> newTriangles = new List<int>();
 
-            Dictionary<Vector2, int> newVerticesMap = new Dictionary<Vector2, int>();
-
             // 頂点の重複を避けるためにマッピング
             Dictionary<Vector3, int> vertexIndexMap = new Dictionary<Vector3, int>();
 
@@ -166,10 +164,10 @@ namespace MeshDeletionTool
                     // 一部の頂点が削除対象の場合
                     else
                     {
-                        List<Vector3> polygonVertices = new List<Vector3>();
+                        List<Vector3> polygonVertices = new List<Vector3>(); //処理対象の多角形の外形頂点
                         List<Vector2> polygonUVs = new List<Vector2>();
 
-                        if (!v1Removed)
+                        if (!v1Removed) // 削除対象でない頂点を多角形頂点に追加
                         {
                             polygonVertices.Add(originalMesh.vertices[v1]);
                             polygonUVs.Add(originalMesh.uv[v1]);
@@ -190,13 +188,14 @@ namespace MeshDeletionTool
 
                         if (texture != null)
                         {
+                            // 三角形の各辺に対して、テクスチャ境界値の計算
                             Vector3? intersection1 = AddEdgeIntersectionPoints(texture, originalMesh.vertices[v1], originalMesh.vertices[v2], originalMesh.uv[v1], originalMesh.uv[v2]);
                             Vector3? intersection2 = AddEdgeIntersectionPoints(texture, originalMesh.vertices[v2], originalMesh.vertices[v3], originalMesh.uv[v2], originalMesh.uv[v3]);
                             Vector3? intersection3 = AddEdgeIntersectionPoints(texture, originalMesh.vertices[v3], originalMesh.vertices[v1], originalMesh.uv[v3], originalMesh.uv[v1]);
 
-                            if (intersection1.HasValue) 
+                            if (intersection1.HasValue) // テクスチャ境界値があるなら
                             {
-                                polygonVertices.Add(intersection1.Value);
+                                polygonVertices.Add(intersection1.Value); //多角形頂点に追加
                                 polygonUVs.Add(Vector2.Lerp(originalMesh.uv[v1], originalMesh.uv[v2], 0.5f));  // UVも追加
                             }
                             if (intersection2.HasValue)
@@ -211,11 +210,12 @@ namespace MeshDeletionTool
                             }
                         }
 
+                        // 全体の頂点に多角形頂点のうち重複しないものを追加
                         for (int j = 0; j < polygonVertices.Count; j++)
                         {
                             Vector3 vertex = polygonVertices[j];
                             Vector2 uv = polygonUVs[j];
-                            if (!vertexIndexMap.ContainsKey(vertex))
+                            if (!vertexIndexMap.ContainsKey(vertex)) //既存頂点の座標マップに含まれない座標の場合
                             {
                                 vertexIndexMap[vertex] = newVertices.Count;
                                 newVertices.Add(vertex);
@@ -224,11 +224,13 @@ namespace MeshDeletionTool
                             
                         }
 
+                        // 耳切り法により、多角形外周頂点から三角ポリゴンに分割し、そのインデックス番号順を返す
                         int[] triangulatedIndices = EarClipping3D.Triangulate(polygonVertices.ToArray());
 
                         for (int j = 0; j < triangulatedIndices.Length; j++)
                         {
                             int polygonIndex = triangulatedIndices[j];
+                            // 全体のTrianglesに先ほど計算した三角ポリゴンをインデックス番号を変換して追加
                             newTriangles.Add(vertexIndexMap[polygonVertices[polygonIndex]]);
                         }
                     }

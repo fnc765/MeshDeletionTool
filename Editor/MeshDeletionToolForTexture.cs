@@ -130,6 +130,9 @@ namespace MeshDeletionTool
 
             Dictionary<Vector2, int> newVerticesMap = new Dictionary<Vector2, int>();
 
+            // 頂点の重複を避けるためにマッピング
+            Dictionary<Vector3, int> vertexIndexMap = new Dictionary<Vector3, int>();
+
             int subMeshCount = originalMesh.subMeshCount;
 
             // サブメッシュ毎に三角ポリゴンを処理する
@@ -208,30 +211,25 @@ namespace MeshDeletionTool
                             }
                         }
 
-                        // 頂点の重複を避けるためにマッピング
-                        Dictionary<Vector3, int> vertexIndexMap = new Dictionary<Vector3, int>();
-                        List<Vector3> uniqueVertices = new List<Vector3>();
-                        List<Vector2> uniqueUVs = new List<Vector2>();
-
                         for (int j = 0; j < polygonVertices.Count; j++)
                         {
                             Vector3 vertex = polygonVertices[j];
                             Vector2 uv = polygonUVs[j];
                             if (!vertexIndexMap.ContainsKey(vertex))
                             {
-                                uniqueVertices.Add(vertex);
-                                uniqueUVs.Add(uv);
                                 vertexIndexMap[vertex] = newVertices.Count;
                                 newVertices.Add(vertex);
                                 newUVs.Add(uv);
                             }
+                            
                         }
 
-                        int[] triangulatedIndices = EarClipping3D.Triangulate(uniqueVertices.ToArray());
+                        int[] triangulatedIndices = EarClipping3D.Triangulate(polygonVertices.ToArray());
 
                         for (int j = 0; j < triangulatedIndices.Length; j++)
                         {
-                            newTriangles.Add(vertexIndexMap[uniqueVertices[triangulatedIndices[j]]]);
+                            int polygonIndex = triangulatedIndices[j];
+                            newTriangles.Add(vertexIndexMap[polygonVertices[polygonIndex]]);
                         }
                     }
                 }

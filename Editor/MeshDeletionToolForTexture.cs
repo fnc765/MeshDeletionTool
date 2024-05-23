@@ -1,6 +1,7 @@
 using UnityEngine;
 using UnityEditor;
 using System.Collections.Generic;
+using System.Linq;
 
 namespace MeshDeletionTool
 {
@@ -131,7 +132,21 @@ namespace MeshDeletionTool
             // 頂点の重複を避けるためにマッピング
             Dictionary<Vector3, int> vertexIndexMap = new Dictionary<Vector3, int>();
 
+            Mesh newMesh = new Mesh();
+
+            for (int index = 0; index < originalMesh.vertexCount; index++)
+            {
+                if (removeVerticesIndexs.Contains(index))
+                    continue;
+                vertexIndexMap[originalMesh.vertices[index]] = newVertices.Count;
+                newVertices.Add(originalMesh.vertices[index]);
+                newUVs.Add(originalMesh.uv[index]);
+            }
+
+
+            newMesh.subMeshCount = originalMesh.subMeshCount;
             int subMeshCount = originalMesh.subMeshCount;
+            int addSubMeshIndex = 0;
 
             // サブメッシュ毎に三角ポリゴンを処理する
             for (int subMeshIndex = 0; subMeshIndex < subMeshCount; subMeshIndex++)
@@ -221,7 +236,6 @@ namespace MeshDeletionTool
                                 newVertices.Add(vertex);
                                 newUVs.Add(uv);
                             }
-                            
                         }
 
                         // 耳切り法により、多角形外周頂点から三角ポリゴンに分割し、そのインデックス番号順を返す
@@ -235,15 +249,20 @@ namespace MeshDeletionTool
                         }
                     }
                 }
+                newMesh.SetVertices(newVertices.ToList());
+                newMesh.SetUVs(0, newUVs.ToList());
+                newMesh.SetTriangles(newTriangles, addSubMeshIndex++);
             }
 
+            newMesh.subMeshCount = addSubMeshIndex;
+
             // 新しいメッシュを作成
-            Mesh newMesh = new Mesh
-            {
-                vertices = newVertices.ToArray(),
-                uv = newUVs.ToArray(),
-                triangles = newTriangles.ToArray()
-            };
+            // Mesh newMesh = new Mesh
+            // {
+            //     vertices = newVertices.ToArray(),
+            //     uv = newUVs.ToArray(),
+            //     triangles = newTriangles.ToArray()
+            // };
 
             return newMesh;
         }

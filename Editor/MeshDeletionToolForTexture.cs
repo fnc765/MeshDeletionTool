@@ -172,9 +172,13 @@ namespace MeshDeletionTool
                     // いずれの頂点も削除対象でない場合、三角形をそのまま追加
                     else if (!v1Removed && !v2Removed && !v3Removed)
                     {
-                        newTriangles.Add(v1);
-                        newTriangles.Add(v2);
-                        newTriangles.Add(v3);
+                        // 先に不要頂点を削除しているため頂点インデックスを変換する必要がある
+                        int transformIndex = newVertices.IndexOf(originalMesh.vertices[v1]);
+                        newTriangles.Add(transformIndex);
+                        transformIndex = newVertices.IndexOf(originalMesh.vertices[v2]);
+                        newTriangles.Add(transformIndex);
+                        transformIndex = newVertices.IndexOf(originalMesh.vertices[v3]);
+                        newTriangles.Add(transformIndex);
                     }
                     // 一部の頂点が削除対象の場合
                     else
@@ -204,24 +208,27 @@ namespace MeshDeletionTool
                         if (texture != null)
                         {
                             // 三角形の各辺に対して、テクスチャ境界値の計算
-                            Vector3? intersection1 = AddEdgeIntersectionPoints(texture, originalMesh.vertices[v1], originalMesh.vertices[v2], originalMesh.uv[v1], originalMesh.uv[v2]);
-                            Vector3? intersection2 = AddEdgeIntersectionPoints(texture, originalMesh.vertices[v2], originalMesh.vertices[v3], originalMesh.uv[v2], originalMesh.uv[v3]);
-                            Vector3? intersection3 = AddEdgeIntersectionPoints(texture, originalMesh.vertices[v3], originalMesh.vertices[v1], originalMesh.uv[v3], originalMesh.uv[v1]);
+                            (Vector2? finalUuV1, Vector3? newVertexV1) = 
+                                AddEdgeIntersectionPoints(texture, originalMesh.vertices[v1], originalMesh.vertices[v2], originalMesh.uv[v1], originalMesh.uv[v2]);
+                            (Vector2? finalUuV2, Vector3? newVertexV2) = 
+                                AddEdgeIntersectionPoints(texture, originalMesh.vertices[v2], originalMesh.vertices[v3], originalMesh.uv[v2], originalMesh.uv[v3]);
+                            (Vector2? finalUuV3, Vector3? newVertexV3) = 
+                                AddEdgeIntersectionPoints(texture, originalMesh.vertices[v3], originalMesh.vertices[v1], originalMesh.uv[v3], originalMesh.uv[v1]);
 
-                            if (intersection1.HasValue) // テクスチャ境界値があるなら
+                            if (newVertexV1.HasValue) // テクスチャ境界値があるなら
                             {
-                                polygonVertices.Add(intersection1.Value); //多角形頂点に追加
-                                polygonUVs.Add(Vector2.Lerp(originalMesh.uv[v1], originalMesh.uv[v2], 0.5f));  // UVも追加
+                                polygonVertices.Add(newVertexV1.Value); //多角形頂点に追加
+                                polygonUVs.Add(finalUuV1.Value);  // UVも追加
                             }
-                            if (intersection2.HasValue)
+                            if (newVertexV2.HasValue)
                             {
-                                polygonVertices.Add(intersection2.Value);
-                                polygonUVs.Add(Vector2.Lerp(originalMesh.uv[v2], originalMesh.uv[v3], 0.5f));  // UVも追加
+                                polygonVertices.Add(newVertexV2.Value);
+                                polygonUVs.Add(finalUuV2.Value);  // UVも追加
                             }
-                            if (intersection3.HasValue)
+                            if (newVertexV3.HasValue)
                             {
-                                polygonVertices.Add(intersection3.Value);
-                                polygonUVs.Add(Vector2.Lerp(originalMesh.uv[v3], originalMesh.uv[v1], 0.5f));  // UVも追加
+                                polygonVertices.Add(newVertexV3.Value);
+                                polygonUVs.Add(finalUuV3.Value);  // UVも追加
                             }
                         }
 
@@ -238,6 +245,7 @@ namespace MeshDeletionTool
                             }
                         }
 
+                        // TODO: 新規三角ポリゴンが裏面になる場合がある
                         // 耳切り法により、多角形外周頂点から三角ポリゴンに分割し、そのインデックス番号順を返す
                         int[] triangulatedIndices = EarClipping3D.Triangulate(polygonVertices.ToArray());
 
@@ -267,15 +275,15 @@ namespace MeshDeletionTool
             return newMesh;
         }
 
-        private Vector3? AddEdgeIntersectionPoints(Texture2D texture, Vector3 p1, Vector3 p2, Vector2 uv1, Vector2 uv2)
+        private (Vector2? finalUV, Vector3? newVertex) AddEdgeIntersectionPoints(Texture2D texture, Vector3 p1, Vector3 p2, Vector2 uv1, Vector2 uv2)
         {
             if (IsBoundaryEdge(texture, uv1, uv2))
             {
-                (Vector2 finalUV, Vector3 newVertex) = FindAlphaBoundary(texture, uv1, uv2, p1, p2);
-                return newVertex;
+                (Vector2? finalUV, Vector3 newVertex) = FindAlphaBoundary(texture, uv1, uv2, p1, p2);
+                return (finalUV, newVertex);
             }
 
-            return null;
+            return (null, null);
         }
 
         private bool IsBoundaryEdge(Texture2D texture, Vector2 uv1, Vector2 uv2)

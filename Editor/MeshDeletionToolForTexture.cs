@@ -5,7 +5,7 @@ using System.Linq;
 
 namespace MeshDeletionTool
 {
-    public class MeshDeletionToolForTexture : MeshDeletionTool
+    public class MeshDeletionToolForTexture : MeshDeletionToolUtils
     {
         // 対象オブジェクトのRendererを保持するための内部フィールド
         internal Renderer targetRenderer;
@@ -16,7 +16,7 @@ namespace MeshDeletionTool
         {
             // ウィンドウを作成し表示する
             MeshDeletionToolForTexture window = (MeshDeletionToolForTexture)EditorWindow.GetWindow(typeof(MeshDeletionToolForTexture));
-            window.titleContent = new GUIContent("MeshDeletionTool");
+            window.titleContent = new GUIContent("MeshDeletionToolForTexture");
             window.Show();
         }
 
@@ -151,6 +151,10 @@ namespace MeshDeletionTool
             // サブメッシュ毎に三角ポリゴンを処理する
             for (int subMeshIndex = 0; subMeshIndex < subMeshCount; subMeshIndex++)
             {
+                Material material = originalMaterials[subMeshIndex];
+                Texture2D texture = material.mainTexture as Texture2D;
+                MakeTextureReadable(texture);   //テクスチャ読み取り有効化
+                
                 int[] triangles = originalMesh.GetTriangles(subMeshIndex);
 
                 // 各三角形を確認し、必要に応じて新しい頂点を追加
@@ -201,9 +205,6 @@ namespace MeshDeletionTool
                             polygonVertices.Add(originalMesh.vertices[v3]);
                             polygonUVs.Add(originalMesh.uv[v3]);
                         }
-
-                        Material material = originalMaterials[subMeshIndex];
-                        Texture2D texture = material.mainTexture as Texture2D;
 
                         if (texture != null)
                         {

@@ -2,10 +2,11 @@ using UnityEngine;
 using UnityEditor;
 using System.Collections.Generic;
 using System.IO;
+using MeshDeletionTool;
 
 namespace MeshGetColorInfo
 {
-    public class MeshGetColorInfo : EditorWindow
+    public class MeshGetColorInfo : MeshDeletionToolUtils
     {
         internal Renderer targetRenderer;
         internal int vertexIndex = 0;
@@ -76,6 +77,11 @@ namespace MeshGetColorInfo
                 {
                     Debug.LogError("マテリアルにテクスチャがアタッチされていません。");
                     continue;
+                }
+
+                if (!texture.isReadable)
+                {
+                    MakeTextureReadable(texture);
                 }
 
                 Vector2[] uv = mesh.uv;

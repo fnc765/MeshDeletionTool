@@ -225,6 +225,28 @@ namespace MeshDeletionTool
             }
         }
 
+        protected void MakeTextureReadable(Texture2D texture)
+        {
+            string path = AssetDatabase.GetAssetPath(texture);
+            if (string.IsNullOrEmpty(path))
+            {
+                Debug.LogError("テクスチャのパスが見つかりません！");
+                return;
+            }
+
+            TextureImporter textureImporter = AssetImporter.GetAtPath(path) as TextureImporter;
+            if (textureImporter != null)
+            {
+                textureImporter.isReadable = true;
+                AssetDatabase.ImportAsset(path, ImportAssetOptions.ForceUpdate);
+                Debug.Log($"テクスチャ '{texture.name}' の読み取り可能設定を有効にしました。");
+            }
+            else
+            {
+                Debug.LogError("TextureImporterが見つかりませんでした。");
+            }
+        }
+
         protected void SaveNewMesh(Mesh newMesh)
         {
             AssetDatabase.CreateAsset(newMesh, "Assets/NewMesh.asset");

@@ -4,7 +4,7 @@ using System.Collections.Generic;
 
 namespace MeshDeletionTool
 {
-    public class MeshDeletionToolForBox : MeshDeletionTool
+    public class MeshDeletionToolForBox : MeshDeletionToolUtils
     {
         internal Renderer targetRenderer;
         private GameObject deletionBoundsObject;

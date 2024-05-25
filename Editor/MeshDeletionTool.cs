@@ -4,7 +4,7 @@ using System.Collections.Generic;
 
 namespace MeshDeletionTool
 {
-    public class MeshDeletionTool : EditorWindow
+    public class MeshDeletionToolUtils : EditorWindow
     {
         protected Mesh GetOriginalMesh(Renderer targetRenderer)
         {

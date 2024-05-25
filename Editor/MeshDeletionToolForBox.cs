@@ -4,16 +4,16 @@ using System.Collections.Generic;
 
 namespace MeshDeletionTool
 {
-    public class MeshDeletionToolForBox : MeshDeletionTool
+    public class MeshDeletionToolForBox : MeshDeletionToolUtils
     {
         internal Renderer targetRenderer;
         private GameObject deletionBoundsObject;
 
-        [MenuItem("Tools/MeshDeletionTool")]
+        [MenuItem("Tools/MeshDeletionToolForBox")]
         private static void Init()
         {
-            MeshDeletionTool window = (MeshDeletionTool)EditorWindow.GetWindow(typeof(MeshDeletionTool));
-            window.titleContent = new GUIContent("MeshDeletionTool");
+            MeshDeletionToolForBox window = (MeshDeletionToolForBox)EditorWindow.GetWindow(typeof(MeshDeletionToolForBox));
+            window.titleContent = new GUIContent("MeshDeletionToolForBox");
             window.Show();
         }
 

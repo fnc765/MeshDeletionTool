@@ -127,7 +127,6 @@ namespace MeshDeletionTool
         {
             List<Vector3> newVertices = new List<Vector3>();
             List<Vector2> newUVs = new List<Vector2>();
-            List<int> newTriangles = new List<int>();
 
             // 頂点の重複を避けるためにマッピング
             Dictionary<Vector3, int> vertexIndexMap = new Dictionary<Vector3, int>();
@@ -156,6 +155,7 @@ namespace MeshDeletionTool
                 MakeTextureReadable(texture);   //テクスチャ読み取り有効化
                 
                 int[] triangles = originalMesh.GetTriangles(subMeshIndex);
+                List<int> newSubMeshTriangles = new List<int>();
 
                 // 各三角形を確認し、必要に応じて新しい頂点を追加
                 for (int i = 0; i < triangles.Length; i += 3)
@@ -178,11 +178,11 @@ namespace MeshDeletionTool
                     {
                         // 先に不要頂点を削除しているため頂点インデックスを変換する必要がある
                         int transformIndex = newVertices.IndexOf(originalMesh.vertices[v1]);
-                        newTriangles.Add(transformIndex);
+                        newSubMeshTriangles.Add(transformIndex);
                         transformIndex = newVertices.IndexOf(originalMesh.vertices[v2]);
-                        newTriangles.Add(transformIndex);
+                        newSubMeshTriangles.Add(transformIndex);
                         transformIndex = newVertices.IndexOf(originalMesh.vertices[v3]);
-                        newTriangles.Add(transformIndex);
+                        newSubMeshTriangles.Add(transformIndex);
                     }
                     // 一部の頂点が削除対象の場合
                     else
@@ -254,24 +254,16 @@ namespace MeshDeletionTool
                         {
                             int polygonIndex = triangulatedIndices[j];
                             // 全体のTrianglesに先ほど計算した三角ポリゴンをインデックス番号を変換して追加
-                            newTriangles.Add(vertexIndexMap[polygonVertices[polygonIndex]]);
+                            newSubMeshTriangles.Add(vertexIndexMap[polygonVertices[polygonIndex]]);
                         }
                     }
                 }
                 newMesh.SetVertices(newVertices.ToList());
                 newMesh.SetUVs(0, newUVs.ToList());
-                newMesh.SetTriangles(newTriangles, addSubMeshIndex++);
+                newMesh.SetTriangles(newSubMeshTriangles, addSubMeshIndex++);
             }
 
             newMesh.subMeshCount = addSubMeshIndex;
-
-            // 新しいメッシュを作成
-            // Mesh newMesh = new Mesh
-            // {
-            //     vertices = newVertices.ToArray(),
-            //     uv = newUVs.ToArray(),
-            //     triangles = newTriangles.ToArray()
-            // };
 
             return newMesh;
         }

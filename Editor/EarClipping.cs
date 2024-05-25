@@ -4,7 +4,7 @@ using UnityEngine;
 
 public class EarClipping3D
 {
-    public static int[] Triangulate(Vector3[] vertices)
+    public static int[] Triangulate(Vector3[] vertices, Vector3 normal)
     {
         if (vertices.Length < 3)
         {
@@ -13,6 +13,9 @@ public class EarClipping3D
 
         // 順序を確認して反時計回りに揃える
         List<int> hull = FindConvexHull(vertices);
+
+        // 法線ベクトルに基づいて順序を修正
+        EnsureCorrectOrientation(vertices, hull, normal);
 
         List<int> triangles = new List<int>();
         List<int> indices = new List<int>(hull);
@@ -62,6 +65,40 @@ public class EarClipping3D
         }
 
         return triangles.ToArray();
+    }
+
+    private static void EnsureCorrectOrientation(Vector3[] vertices, List<int> hull, Vector3 normal)
+    {
+        // Hullの法線ベクトルを計算
+        Vector3 hullNormal = Vector3.zero;
+        for (int i = 0; i < hull.Count - 2; i++)
+        {
+            Vector3 v0 = vertices[hull[i]];
+            Vector3 v1 = vertices[hull[i + 1]];
+            Vector3 v2 = vertices[hull[i + 2]];
+            hullNormal += Vector3.Cross(v1 - v0, v2 - v0);
+        }
+
+        // 向きをチェックして必要なら反転
+        if (Vector3.Dot(normal, hullNormal) < 0)
+        {
+            hull.Reverse();
+        }
+    }
+
+    public static Vector3 CalculateNormal(Vector3[] vertices)
+    {
+        if (vertices.Length != 3)
+        {
+            throw new ArgumentException("三角形インデックスは3つの頂点インデックスである必要があります。");
+        }
+
+        Vector3 A = vertices[0];
+        Vector3 B = vertices[1];
+        Vector3 C = vertices[2];
+
+        // 三角形の法線ベクトルを計算
+        return Vector3.Cross(B - A, C - A).normalized;
     }
 
     private static List<int> FindConvexHull(Vector3[] points)

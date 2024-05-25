@@ -246,9 +246,13 @@ namespace MeshDeletionTool
                             }
                         }
 
-                        // TODO: 新規三角ポリゴンが裏面になる場合がある
+                        // 処理対象の三角ポリゴンから法線ベクトルを計算し、面の向きを指定する
+                        Vector3[] basisVertices = {originalMesh.vertices[v1],
+                                                   originalMesh.vertices[v2],
+                                                   originalMesh.vertices[v3]};
+                        Vector3 normal = EarClipping3D.CalculateNormal(basisVertices);
                         // 耳切り法により、多角形外周頂点から三角ポリゴンに分割し、そのインデックス番号順を返す
-                        int[] triangulatedIndices = EarClipping3D.Triangulate(polygonVertices.ToArray());
+                        int[] triangulatedIndices = EarClipping3D.Triangulate(polygonVertices.ToArray(), normal);
 
                         for (int j = 0; j < triangulatedIndices.Length; j++)
                         {

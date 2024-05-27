@@ -76,6 +76,14 @@ namespace MeshDeletionTool
 
             int subMeshCount = originalMesh.subMeshCount;
             List<HashSet<int>> subMeshTrianglesList = new List<HashSet<int>>();
+
+            // メッシュに使用されているテクスチャ読み取りの有効化
+            for (int subMeshIndex = 0; subMeshIndex < subMeshCount; subMeshIndex++)
+            {
+                Material material = originalMaterials[subMeshIndex];
+                Texture2D texture = material.mainTexture as Texture2D;
+                MakeTextureReadable(texture);   //テクスチャ読み取り有効化
+            }
             
             // 各サブメッシュの三角形リストを取得
             for (int subMeshIndex = 0; subMeshIndex < subMeshCount; subMeshIndex++)
@@ -180,7 +188,6 @@ namespace MeshDeletionTool
             {
                 Material material = originalMaterials[subMeshIndex];
                 Texture2D texture = material.mainTexture as Texture2D;
-                MakeTextureReadable(texture);   //テクスチャ読み取り有効化
                 
                 int[] triangles = originalMesh.GetTriangles(subMeshIndex);
                 List<int> newSubMeshTriangles = new List<int>();

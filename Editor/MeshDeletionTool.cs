@@ -77,14 +77,25 @@ namespace MeshDeletionTool
                 uv4 = newMeshData.UV4.ToArray(),
                 colors = newMeshData.Colors.ToArray(),
                 colors32 = newMeshData.Colors32.ToArray(),
-                boneWeights = newMeshData.BoneWeights.ToArray()
+                boneWeights = newMeshData.BoneWeights.ToArray(),
+                bindposes = originalMesh.bindposes
             };
 
-            RemoveTriangles(originalMesh, removeVerticesIndexs, newMeshData.Vertices, newMeshData.Triangles);
+            // インデックスマッピングの作成
+            Dictionary<int, int> oldToNewIndexMap = new Dictionary<int, int>();
+            for (int oldIndex = 0, newIndex = 0; oldIndex < originalMesh.vertexCount; oldIndex++)
+            {
+                if (!removeVerticesIndexs.Contains(oldIndex))
+                {
+                    oldToNewIndexMap[oldIndex] = newIndex;
+                    newIndex++;
+                }
+            }
+
+            RemoveTriangles(originalMesh, removeVerticesIndexs, oldToNewIndexMap, newMeshData.Triangles);
             newMesh.triangles = newMeshData.Triangles.ToArray();
-            RemoveSubMeshes(originalMesh, removeVerticesIndexs, newMeshData.Vertices, newMesh);
+            RemoveSubMeshes(originalMesh, removeVerticesIndexs, oldToNewIndexMap, newMesh);
             RemoveBlendShapes(originalMesh, removeVerticesIndexs, newMesh);
-            newMesh.bindposes = originalMesh.bindposes;
 
             return newMesh;
         }
@@ -93,71 +104,56 @@ namespace MeshDeletionTool
         {
             HashSet<int> removeVerticesIndexsSet = new HashSet<int>(removeVerticesIndexs);
 
-            int verticesLength = originalMesh.vertices.Length;
-            int normalsLength = originalMesh.normals.Length;
-            int tangentsLength = originalMesh.tangents.Length;
-            int uvLength = originalMesh.uv.Length;
-            int uv2Length = originalMesh.uv2.Length;
-            int uv3Length = originalMesh.uv3.Length;
-            int uv4Length = originalMesh.uv4.Length;
-            int colorsLength = originalMesh.colors.Length;
-            int colors32Length = originalMesh.colors32.Length;
-            int boneWeightsLength = originalMesh.boneWeights.Length;
-
-            for (int index = 0; index < verticesLength; index++)
+            for (int index = 0; index < originalMesh.vertexCount; index++)
             {
                 if (removeVerticesIndexsSet.Contains(index))
                     continue;
 
                 newMeshData.Vertices.Add(originalMesh.vertices[index]);
-                if (normalsLength > index)
+                if (index < originalMesh.normals.Length)
                     newMeshData.Normals.Add(originalMesh.normals[index]);
-                if (tangentsLength > index)
+                if (index < originalMesh.tangents.Length)
                     newMeshData.Tangents.Add(originalMesh.tangents[index]);
 
-                if (uvLength > index)
+                if (index < originalMesh.uv.Length)
                     newMeshData.UV.Add(originalMesh.uv[index]);
-                if (uv2Length > index)
+                if (index < originalMesh.uv2.Length)
                     newMeshData.UV2.Add(originalMesh.uv2[index]);
-                if (uv3Length > index)
+                if (index < originalMesh.uv3.Length)
                     newMeshData.UV3.Add(originalMesh.uv3[index]);
-                if (uv4Length > index)
+                if (index < originalMesh.uv4.Length)
                     newMeshData.UV4.Add(originalMesh.uv4[index]);
 
-                if (colorsLength > index)
+                if (index < originalMesh.colors.Length)
                     newMeshData.Colors.Add(originalMesh.colors[index]);
-                if (colors32Length > index)
+                if (index < originalMesh.colors32.Length)
                     newMeshData.Colors32.Add(originalMesh.colors32[index]);
 
-                if (boneWeightsLength > index)
+                if (index < originalMesh.boneWeights.Length)
                     newMeshData.BoneWeights.Add(originalMesh.boneWeights[index]);
             }
         }
 
-        protected void RemoveTriangles(Mesh originalMesh, List<int> removeVerticesIndexs, List<Vector3> newVerticesList, List<int> newTrianglesList)
+        protected void RemoveTriangles(Mesh originalMesh, List<int> removeVerticesIndexs, Dictionary<int, int> oldToNewIndexMap, List<int> newTrianglesList)
         {
-            for (int index = 0; index < originalMesh.triangles.Length; index += 3)
+            for (int i = 0; i < originalMesh.triangles.Length; i += 3)
             {
-                int index0 = originalMesh.triangles[index];
-                int index1 = originalMesh.triangles[index + 1];
-                int index2 = originalMesh.triangles[index + 2];
+                int index0 = originalMesh.triangles[i];
+                int index1 = originalMesh.triangles[i + 1];
+                int index2 = originalMesh.triangles[i + 2];
 
                 if (!removeVerticesIndexs.Contains(index0) &&
                     !removeVerticesIndexs.Contains(index1) &&
                     !removeVerticesIndexs.Contains(index2))
                 {
-                    int newIndex0 = newVerticesList.IndexOf(originalMesh.vertices[index0]);
-                    int newIndex1 = newVerticesList.IndexOf(originalMesh.vertices[index1]);
-                    int newIndex2 = newVerticesList.IndexOf(originalMesh.vertices[index2]);
-
-                    newTrianglesList.Add(newIndex0);
-                    newTrianglesList.Add(newIndex1);
-                    newTrianglesList.Add(newIndex2);
+                    newTrianglesList.Add(oldToNewIndexMap[index0]);
+                    newTrianglesList.Add(oldToNewIndexMap[index1]);
+                    newTrianglesList.Add(oldToNewIndexMap[index2]);
                 }
             }
         }
 
-        protected void RemoveSubMeshes(Mesh originalMesh, List<int> removeVerticesIndexs, List<Vector3> newVerticesList, Mesh newMesh)
+        protected void RemoveSubMeshes(Mesh originalMesh, List<int> removeVerticesIndexs, Dictionary<int, int> oldToNewIndexMap, Mesh newMesh)
         {
             int subMeshCount = originalMesh.subMeshCount;
             newMesh.subMeshCount = subMeshCount;
@@ -167,23 +163,19 @@ namespace MeshDeletionTool
                 int[] originalTriangles = originalMesh.GetTriangles(subMeshIndex);
                 List<int> newTriangles = new List<int>();
 
-                for (int index = 0; index < originalTriangles.Length; index += 3)
+                for (int i = 0; i < originalTriangles.Length; i += 3)
                 {
-                    int index0 = originalTriangles[index];
-                    int index1 = originalTriangles[index + 1];
-                    int index2 = originalTriangles[index + 2];
+                    int index0 = originalTriangles[i];
+                    int index1 = originalTriangles[i + 1];
+                    int index2 = originalTriangles[i + 2];
 
                     if (!removeVerticesIndexs.Contains(index0) &&
                         !removeVerticesIndexs.Contains(index1) &&
                         !removeVerticesIndexs.Contains(index2))
                     {
-                        int newIndex0 = newVerticesList.IndexOf(originalMesh.vertices[index0]);
-                        int newIndex1 = newVerticesList.IndexOf(originalMesh.vertices[index1]);
-                        int newIndex2 = newVerticesList.IndexOf(originalMesh.vertices[index2]);
-
-                        newTriangles.Add(newIndex0);
-                        newTriangles.Add(newIndex1);
-                        newTriangles.Add(newIndex2);
+                        newTriangles.Add(oldToNewIndexMap[index0]);
+                        newTriangles.Add(oldToNewIndexMap[index1]);
+                        newTriangles.Add(oldToNewIndexMap[index2]);
                     }
                 }
 

@@ -2,6 +2,7 @@ using UnityEngine;
 using UnityEditor;
 using System.Collections.Generic;
 using System.Linq;
+using Unity.VisualScripting;
 
 namespace MeshDeletionTool
 {
@@ -128,18 +129,45 @@ namespace MeshDeletionTool
             List<Vector3> newVertices = new List<Vector3>();
             List<Vector2> newUVs = new List<Vector2>();
 
-            // 頂点の重複を避けるためにマッピング
-            Dictionary<Vector3, int> vertexIndexMap = new Dictionary<Vector3, int>();
+            // 新規追加頂点の重複を避けるためにマッピング
+            Dictionary<Vector3, int> addVertexIndexMap = new Dictionary<Vector3, int>();
 
             Mesh newMesh = new Mesh();
 
+            Dictionary<Vector3, int> seamVertex = new Dictionary<Vector3, int>();
+            HashSet<int> seamVertexIndex = new HashSet<int>();
+
+            // 先に不要頂点を削除する
             for (int index = 0; index < originalMesh.vertexCount; index++)
             {
                 if (removeVerticesIndexs.Contains(index))
                     continue;
-                vertexIndexMap[originalMesh.vertices[index]] = newVertices.Count;
-                newVertices.Add(originalMesh.vertices[index]);
+
+                Vector3 vertex = originalMesh.vertices[index];
+                newVertices.Add(vertex);
                 newUVs.Add(originalMesh.uv[index]);
+
+                // シームの頂点かどうかをチェックし、インデックスを格納
+                if (seamVertex.ContainsKey(vertex))
+                {
+                    seamVertexIndex.Add(seamVertex[vertex]); // 既に存在する頂点なので、そのインデックスを追加
+                    seamVertexIndex.Add(index); // 現在のインデックスも追加
+                }
+                else
+                {
+                    seamVertex.Add(vertex, index); // 新しい頂点を追加
+                }
+            }
+
+            // インデックスマッピングの作成
+            Dictionary<int, int> oldToNewIndexMap = new Dictionary<int, int>();
+            for (int oldIndex = 0, newIndex = 0; oldIndex < originalMesh.vertexCount; oldIndex++)
+            {
+                if (!removeVerticesIndexs.Contains(oldIndex))
+                {
+                    oldToNewIndexMap[oldIndex] = newIndex;
+                    newIndex++;
+                }
             }
 
 
@@ -177,33 +205,37 @@ namespace MeshDeletionTool
                     else if (!v1Removed && !v2Removed && !v3Removed)
                     {
                         // 先に不要頂点を削除しているため頂点インデックスを変換する必要がある
-                        int transformIndex = newVertices.IndexOf(originalMesh.vertices[v1]);
-                        newSubMeshTriangles.Add(transformIndex);
-                        transformIndex = newVertices.IndexOf(originalMesh.vertices[v2]);
-                        newSubMeshTriangles.Add(transformIndex);
-                        transformIndex = newVertices.IndexOf(originalMesh.vertices[v3]);
-                        newSubMeshTriangles.Add(transformIndex);
+                        newSubMeshTriangles.Add(oldToNewIndexMap[v1]);
+                        newSubMeshTriangles.Add(oldToNewIndexMap[v2]);
+                        newSubMeshTriangles.Add(oldToNewIndexMap[v3]);
                     }
                     // 一部の頂点が削除対象の場合
                     else
                     {
-                        List<Vector3> polygonVertices = new List<Vector3>(); //処理対象の多角形の外形頂点
-                        List<Vector2> polygonUVs = new List<Vector2>();
+                        List<Vector3> addVertices = new List<Vector3>(); //処理対象の多角形の外形頂点
+                        List<Vector2> addUVs = new List<Vector2>();
+                        List<Vector3> originVertices = new List<Vector3>(); //処理対象の多角形の外形頂点
+                        List<Vector2> originUVs = new List<Vector2>();
+                        Dictionary<int, int> polygonToGlobalIndexMap = new Dictionary<int, int>();
+                        int oldIndex = 0;
 
                         if (!v1Removed) // 削除対象でない頂点を多角形頂点に追加
                         {
-                            polygonVertices.Add(originalMesh.vertices[v1]);
-                            polygonUVs.Add(originalMesh.uv[v1]);
+                            originVertices.Add(originalMesh.vertices[v1]);
+                            polygonToGlobalIndexMap[oldIndex++] = oldToNewIndexMap[v1];
+                            originUVs.Add(originalMesh.uv[v1]);
                         }
                         if (!v2Removed)
                         {
-                            polygonVertices.Add(originalMesh.vertices[v2]);
-                            polygonUVs.Add(originalMesh.uv[v2]);
+                            originVertices.Add(originalMesh.vertices[v2]);
+                            polygonToGlobalIndexMap[oldIndex++] = oldToNewIndexMap[v2];
+                            originUVs.Add(originalMesh.uv[v2]);
                         }
                         if (!v3Removed)
                         {
-                            polygonVertices.Add(originalMesh.vertices[v3]);
-                            polygonUVs.Add(originalMesh.uv[v3]);
+                            originVertices.Add(originalMesh.vertices[v3]);
+                            polygonToGlobalIndexMap[oldIndex++] = oldToNewIndexMap[v3];
+                            originUVs.Add(originalMesh.uv[v3]);
                         }
 
                         if (texture != null)
@@ -218,33 +250,45 @@ namespace MeshDeletionTool
 
                             if (newVertexV1.HasValue) // テクスチャ境界値があるなら
                             {
-                                polygonVertices.Add(newVertexV1.Value); //多角形頂点に追加
-                                polygonUVs.Add(finalUuV1.Value);  // UVも追加
+                                addVertices.Add(newVertexV1.Value); //多角形頂点に追加
+                                addUVs.Add(finalUuV1.Value);  // UVも追加
                             }
                             if (newVertexV2.HasValue)
                             {
-                                polygonVertices.Add(newVertexV2.Value);
-                                polygonUVs.Add(finalUuV2.Value);  // UVも追加
+                                addVertices.Add(newVertexV2.Value);
+                                addUVs.Add(finalUuV2.Value);  // UVも追加
                             }
                             if (newVertexV3.HasValue)
                             {
-                                polygonVertices.Add(newVertexV3.Value);
-                                polygonUVs.Add(finalUuV3.Value);  // UVも追加
+                                addVertices.Add(newVertexV3.Value);
+                                addUVs.Add(finalUuV3.Value);  // UVも追加
                             }
                         }
 
-                        // 全体の頂点に多角形頂点のうち重複しないものを追加
-                        for (int j = 0; j < polygonVertices.Count; j++)
+                        // 追加頂点の中で重複が無いようにする（既存頂点はシームなどで重複がある）
+                        for (int j = 0; j < addVertices.Count; j++)
                         {
-                            Vector3 vertex = polygonVertices[j];
-                            Vector2 uv = polygonUVs[j];
-                            if (!vertexIndexMap.ContainsKey(vertex)) //既存頂点の座標マップに含まれない座標の場合
-                            {
-                                vertexIndexMap[vertex] = newVertices.Count;
+                            Vector3 vertex = addVertices[j];
+                            Vector2 uv = addUVs[j];
+                            if (!addVertexIndexMap.ContainsKey(vertex)) {//追加頂点の座標マップに含まれない座標の場合
+                                //TODO: 本来は継ぎ目の辺へ新規頂点追加時の判定が必要だが、簡易的に対象ポリゴン頂点がシーム頂点に含まれているかで判定している
+                                //継ぎ目の辺でないなら
+                                if (!seamVertexIndex.Contains(v1) &&
+                                    !seamVertexIndex.Contains(v2) &&
+                                    !seamVertexIndex.Contains(v3)) {
+                                    addVertexIndexMap[vertex] = newVertices.Count;  //追加頂点の重複防止Mapに追加
+                                }
                                 newVertices.Add(vertex);
                                 newUVs.Add(uv);
+                                polygonToGlobalIndexMap[oldIndex++] = newVertices.Count - 1;
+                            } else {
+                                polygonToGlobalIndexMap[oldIndex++] = addVertexIndexMap[vertex];
                             }
                         }
+
+                        List<Vector3> polygonVertices = new List<Vector3>(); //処理対象の多角形の外形頂点
+                        polygonVertices.AddRange(originVertices);
+                        polygonVertices.AddRange(addVertices);
 
                         // 処理対象の三角ポリゴンから法線ベクトルを計算し、面の向きを指定する
                         Vector3[] basisVertices = {originalMesh.vertices[v1],
@@ -258,7 +302,7 @@ namespace MeshDeletionTool
                         {
                             int polygonIndex = triangulatedIndices[j];
                             // 全体のTrianglesに先ほど計算した三角ポリゴンをインデックス番号を変換して追加
-                            newSubMeshTriangles.Add(vertexIndexMap[polygonVertices[polygonIndex]]);
+                            newSubMeshTriangles.Add(polygonToGlobalIndexMap[polygonIndex]);
                         }
                     }
                 }

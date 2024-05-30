@@ -132,29 +132,15 @@ namespace MeshDeletionTool
             return removeVerticesIndexs;
         }
 
-        private Mesh CreateMeshAfterVertexModification(Mesh originalMesh, Material[] originalMaterials, List<int> removeVerticesIndexs)
+        // 重複している頂点(シーム)のインデックスリストを作成
+        private HashSet<int> CreateSeamIndex(Mesh mesh)
         {
-            List<Vector3> newVertices = new List<Vector3>();
-            List<Vector2> newUVs = new List<Vector2>();
-
-            // 新規追加頂点の重複を避けるためにマッピング
-            Dictionary<Vector3, int> addVertexIndexMap = new Dictionary<Vector3, int>();
-
-            Mesh newMesh = new Mesh();
-
             Dictionary<Vector3, int> seamVertex = new Dictionary<Vector3, int>();
             HashSet<int> seamVertexIndex = new HashSet<int>();
 
-            // 先に不要頂点を削除する
-            for (int index = 0; index < originalMesh.vertexCount; index++)
+            for (int index = 0; index < mesh.vertexCount; index++)
             {
-                if (removeVerticesIndexs.Contains(index))
-                    continue;
-
-                Vector3 vertex = originalMesh.vertices[index];
-                newVertices.Add(vertex);
-                newUVs.Add(originalMesh.uv[index]);
-
+                Vector3 vertex = mesh.vertices[index];
                 // シームの頂点かどうかをチェックし、インデックスを格納
                 if (seamVertex.ContainsKey(vertex))
                 {
@@ -166,8 +152,12 @@ namespace MeshDeletionTool
                     seamVertex.Add(vertex, index); // 新しい頂点を追加
                 }
             }
+            return seamVertexIndex;
+        }
 
-            // インデックスマッピングの作成
+        // インデックスマッピングの作成
+        private Dictionary<int, int> CreateIndexMap(Mesh originalMesh, List<int> removeVerticesIndexs)
+        {
             Dictionary<int, int> oldToNewIndexMap = new Dictionary<int, int>();
             for (int oldIndex = 0, newIndex = 0; oldIndex < originalMesh.vertexCount; oldIndex++)
             {
@@ -177,6 +167,35 @@ namespace MeshDeletionTool
                     newIndex++;
                 }
             }
+            return oldToNewIndexMap;
+        }
+
+        private Mesh CreateMeshAfterVertexModification(Mesh originalMesh, Material[] originalMaterials, List<int> removeVerticesIndexs)
+        {
+            List<Vector3> newVertices = new List<Vector3>();
+            List<Vector2> newUVs = new List<Vector2>();
+
+            // 新規追加頂点の重複を避けるためにマッピング
+            Dictionary<Vector3, int> addVertexIndexMap = new Dictionary<Vector3, int>();
+
+            Mesh newMesh = new Mesh();
+
+            // 先に不要頂点を削除する
+            for (int index = 0; index < originalMesh.vertexCount; index++)
+            {
+                if (removeVerticesIndexs.Contains(index))
+                    continue;
+
+                Vector3 vertex = originalMesh.vertices[index];
+                newVertices.Add(vertex);
+                newUVs.Add(originalMesh.uv[index]);
+            }
+            
+            // 重複している頂点(シーム)のインデックスリストを作成
+            HashSet<int> seamVertexIndex = CreateSeamIndex(originalMesh);
+
+            // インデックスマッピングの作成
+            Dictionary<int, int> oldToNewIndexMap = CreateIndexMap(originalMesh, removeVerticesIndexs);
 
 
             newMesh.subMeshCount = originalMesh.subMeshCount;
@@ -245,6 +264,7 @@ namespace MeshDeletionTool
                             originUVs.Add(originalMesh.uv[v3]);
                         }
 
+                        // 新規頂点追加処理（座標および頂点に付随するデータの補完を実行し新規頂点を追加する）
                         if (texture != null)
                         {
                             // 三角形の各辺に対して、テクスチャ境界値の計算

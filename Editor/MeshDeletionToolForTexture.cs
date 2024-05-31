@@ -268,28 +268,21 @@ namespace MeshDeletionTool
                         // 新規頂点追加処理（座標および頂点に付随するデータの補完を実行し新規頂点を追加する）
                         if (texture != null)
                         {
+                            List<int[]> sideIndexs = new List<int[]>(){
+                                new int[] {v1, v2},
+                                new int[] {v2, v3},
+                                new int[] {v3, v1}
+                            };
                             // 三角形の各辺に対して、テクスチャ境界値の計算
-                            (Vector2? finalUuV1, Vector3? newVertexV1) = 
-                                AddEdgeIntersectionPoints(texture, originalMesh.vertices[v1], originalMesh.vertices[v2], originalMesh.uv[v1], originalMesh.uv[v2]);
-                            (Vector2? finalUuV2, Vector3? newVertexV2) = 
-                                AddEdgeIntersectionPoints(texture, originalMesh.vertices[v2], originalMesh.vertices[v3], originalMesh.uv[v2], originalMesh.uv[v3]);
-                            (Vector2? finalUuV3, Vector3? newVertexV3) = 
-                                AddEdgeIntersectionPoints(texture, originalMesh.vertices[v3], originalMesh.vertices[v1], originalMesh.uv[v3], originalMesh.uv[v1]);
-
-                            if (newVertexV1.HasValue) // テクスチャ境界値があるなら
+                            for (int triangleIndex = 0; triangleIndex < 3; triangleIndex++)
                             {
-                                addVertices.Add(newVertexV1.Value); //多角形頂点に追加
-                                addUVs.Add(finalUuV1.Value);  // UVも追加
-                            }
-                            if (newVertexV2.HasValue)
-                            {
-                                addVertices.Add(newVertexV2.Value);
-                                addUVs.Add(finalUuV2.Value);  // UVも追加
-                            }
-                            if (newVertexV3.HasValue)
-                            {
-                                addVertices.Add(newVertexV3.Value);
-                                addUVs.Add(finalUuV3.Value);  // UVも追加
+                                (Vector2? newUV, Vector3? newVertex) = 
+                                    AddEdgeIntersectionPoints(originalMesh, texture, sideIndexs[triangleIndex]);
+                                if (newVertex.HasValue) // テクスチャ境界値があるなら
+                                {
+                                    addVertices.Add(newVertex.Value); //多角形頂点に追加
+                                    addUVs.Add(newUV.Value);  // UVも追加
+                                }
                             }
                         }
 
@@ -344,8 +337,12 @@ namespace MeshDeletionTool
             return newMesh;
         }
 
-        private (Vector2? finalUV, Vector3? newVertex) AddEdgeIntersectionPoints(Texture2D texture, Vector3 p1, Vector3 p2, Vector2 uv1, Vector2 uv2)
+        private (Vector2? finalUV, Vector3? newVertex) AddEdgeIntersectionPoints(Mesh originalMesh, Texture2D texture, int[] indexs)
         {
+            Vector3 p1 = originalMesh.vertices[indexs[0]];
+            Vector3 p2 = originalMesh.vertices[indexs[1]];
+            Vector2 uv1 = originalMesh.uv[indexs[0]];
+            Vector2 uv2 = originalMesh.uv[indexs[1]];
             if (IsBoundaryEdge(texture, uv1, uv2))
             {
                 (Vector2? finalUV, Vector3 newVertex) = FindAlphaBoundary(texture, uv1, uv2, p1, p2);

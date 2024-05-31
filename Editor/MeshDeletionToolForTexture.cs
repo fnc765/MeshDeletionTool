@@ -170,6 +170,24 @@ namespace MeshDeletionTool
             return oldToNewIndexMap;
         }
 
+        // 削除対象でない頂点を多角形頂点に追加
+        private (List<Vector3>, List<int>) addNonDeletableVertexToPolygon(Mesh originalMesh,
+                                                                          Dictionary<int, int> oldToNewIndexMap,
+                                                                          int[] indexs, bool[] isRemoved)
+        {
+            List<Vector3> originVertices = new List<Vector3>(); //処理対象の多角形の外形頂点
+            List<int> polygonToGlobalIndexMap = new List<int>();
+
+            for (int index = 0; index < 3; index++) {
+                if (!isRemoved[index]) // 削除対象でない頂点を多角形頂点に追加
+                {
+                    originVertices.Add(originalMesh.vertices[indexs[index]]);
+                    polygonToGlobalIndexMap.Add(oldToNewIndexMap[indexs[index]]);
+                }
+            }
+            return (originVertices, polygonToGlobalIndexMap);
+        }
+
         private Mesh CreateMeshAfterVertexModification(Mesh originalMesh, Material[] originalMaterials, List<int> removeVerticesIndexs)
         {
             List<Vector3> newVertices = new List<Vector3>();
@@ -240,24 +258,12 @@ namespace MeshDeletionTool
                     {
                         List<Vector3> addVertices = new List<Vector3>(); //処理対象の多角形の外形頂点
                         List<Vector2> addUVs = new List<Vector2>();
-                        List<Vector3> originVertices = new List<Vector3>(); //処理対象の多角形の外形頂点
-                        List<int> polygonToGlobalIndexMap = new List<int>();
 
-                        if (!v1Removed) // 削除対象でない頂点を多角形頂点に追加
-                        {
-                            originVertices.Add(originalMesh.vertices[v1]);
-                            polygonToGlobalIndexMap.Add(oldToNewIndexMap[v1]);
-                        }
-                        if (!v2Removed)
-                        {
-                            originVertices.Add(originalMesh.vertices[v2]);
-                            polygonToGlobalIndexMap.Add(oldToNewIndexMap[v2]);
-                        }
-                        if (!v3Removed)
-                        {
-                            originVertices.Add(originalMesh.vertices[v3]);
-                            polygonToGlobalIndexMap.Add(oldToNewIndexMap[v3]);
-                        }
+                        int[] indexs = { v1, v2, v3 };
+                        bool[] isRemoved = { v1Removed, v2Removed, v3Removed };
+                        // 削除対象でない頂点を多角形頂点に追加
+                        (List<Vector3> originVertices, List<int> polygonToGlobalIndexMap) =
+                            addNonDeletableVertexToPolygon(originalMesh, oldToNewIndexMap, indexs, isRemoved);         
 
                         // 新規頂点追加処理（座標および頂点に付随するデータの補完を実行し新規頂点を追加する）
                         if (texture != null)

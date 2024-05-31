@@ -241,7 +241,6 @@ namespace MeshDeletionTool
                         List<Vector3> addVertices = new List<Vector3>(); //処理対象の多角形の外形頂点
                         List<Vector2> addUVs = new List<Vector2>();
                         List<Vector3> originVertices = new List<Vector3>(); //処理対象の多角形の外形頂点
-                        List<Vector2> originUVs = new List<Vector2>();
                         Dictionary<int, int> polygonToGlobalIndexMap = new Dictionary<int, int>();
                         int oldIndex = 0;
 
@@ -249,19 +248,16 @@ namespace MeshDeletionTool
                         {
                             originVertices.Add(originalMesh.vertices[v1]);
                             polygonToGlobalIndexMap[oldIndex++] = oldToNewIndexMap[v1];
-                            originUVs.Add(originalMesh.uv[v1]);
                         }
                         if (!v2Removed)
                         {
                             originVertices.Add(originalMesh.vertices[v2]);
                             polygonToGlobalIndexMap[oldIndex++] = oldToNewIndexMap[v2];
-                            originUVs.Add(originalMesh.uv[v2]);
                         }
                         if (!v3Removed)
                         {
                             originVertices.Add(originalMesh.vertices[v3]);
                             polygonToGlobalIndexMap[oldIndex++] = oldToNewIndexMap[v3];
-                            originUVs.Add(originalMesh.uv[v3]);
                         }
 
                         // 新規頂点追加処理（座標および頂点に付随するデータの補完を実行し新規頂点を追加する）

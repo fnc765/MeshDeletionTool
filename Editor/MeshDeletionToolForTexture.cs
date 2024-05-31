@@ -241,23 +241,22 @@ namespace MeshDeletionTool
                         List<Vector3> addVertices = new List<Vector3>(); //処理対象の多角形の外形頂点
                         List<Vector2> addUVs = new List<Vector2>();
                         List<Vector3> originVertices = new List<Vector3>(); //処理対象の多角形の外形頂点
-                        Dictionary<int, int> polygonToGlobalIndexMap = new Dictionary<int, int>();
-                        int oldIndex = 0;
+                        List<int> polygonToGlobalIndexMap = new List<int>();
 
                         if (!v1Removed) // 削除対象でない頂点を多角形頂点に追加
                         {
                             originVertices.Add(originalMesh.vertices[v1]);
-                            polygonToGlobalIndexMap[oldIndex++] = oldToNewIndexMap[v1];
+                            polygonToGlobalIndexMap.Add(oldToNewIndexMap[v1]);
                         }
                         if (!v2Removed)
                         {
                             originVertices.Add(originalMesh.vertices[v2]);
-                            polygonToGlobalIndexMap[oldIndex++] = oldToNewIndexMap[v2];
+                            polygonToGlobalIndexMap.Add(oldToNewIndexMap[v2]);
                         }
                         if (!v3Removed)
                         {
                             originVertices.Add(originalMesh.vertices[v3]);
-                            polygonToGlobalIndexMap[oldIndex++] = oldToNewIndexMap[v3];
+                            polygonToGlobalIndexMap.Add(oldToNewIndexMap[v3]);
                         }
 
                         // 新規頂点追加処理（座標および頂点に付随するデータの補完を実行し新規頂点を追加する）
@@ -303,9 +302,9 @@ namespace MeshDeletionTool
                                 }
                                 newVertices.Add(vertex);
                                 newUVs.Add(uv);
-                                polygonToGlobalIndexMap[oldIndex++] = newVertices.Count - 1;
+                                polygonToGlobalIndexMap.Add(newVertices.Count - 1);
                             } else {
-                                polygonToGlobalIndexMap[oldIndex++] = addVertexIndexMap[vertex];
+                                polygonToGlobalIndexMap.Add(addVertexIndexMap[vertex]);
                             }
                         }
 

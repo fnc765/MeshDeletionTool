@@ -337,45 +337,60 @@ namespace MeshDeletionTool
             return newMesh;
         }
 
+        // originalMeshのエッジとテクスチャの境界点を検出し、エッジ交点のUV座標と新しい頂点座標を返す関数
         private (Vector2? finalUV, Vector3? newVertex) AddEdgeIntersectionPoints(Mesh originalMesh, Texture2D texture, int[] indexs)
         {
+            // エッジの両端点の3D座標とUV座標を取得
             Vector3 p1 = originalMesh.vertices[indexs[0]];
             Vector3 p2 = originalMesh.vertices[indexs[1]];
             Vector2 uv1 = originalMesh.uv[indexs[0]];
             Vector2 uv2 = originalMesh.uv[indexs[1]];
+
+            // エッジが境界エッジかどうかを判定
             if (IsBoundaryEdge(texture, uv1, uv2))
             {
+                // 境界エッジの場合、境界点のUV座標と頂点座標を計算
                 (Vector2? finalUV, Vector3 newVertex) = FindAlphaBoundary(texture, uv1, uv2, p1, p2);
                 return (finalUV, newVertex);
             }
 
+            // 境界エッジでない場合はnullを返す
             return (null, null);
         }
 
+        // UV座標が示すテクスチャのピクセルが境界エッジかどうかを判定する関数
         private bool IsBoundaryEdge(Texture2D texture, Vector2 uv1, Vector2 uv2)
         {
+            // UV座標をピクセル座標に変換
             Vector2 pixelUV1 = new Vector2(uv1.x * (texture.width - 1), uv1.y * (texture.height - 1));
             Vector2 pixelUV2 = new Vector2(uv2.x * (texture.width - 1), uv2.y * (texture.height - 1));
 
+            // 両端点のピクセルの色を取得
             Color color1 = texture.GetPixel((int)pixelUV1.x, (int)pixelUV1.y);
             Color color2 = texture.GetPixel((int)pixelUV2.x, (int)pixelUV2.y);
 
+            // 片方のピクセルが透明で、もう片方が透明でない場合は境界エッジとする
             return (color1.a == 0 && color2.a != 0) || (color1.a != 0 && color2.a == 0);
         }
 
+        // テクスチャのアルファ値に基づき、エッジ上の境界点のUV座標と頂点座標を探す関数
         private (Vector2 uv, Vector3 vertex) FindAlphaBoundary(Texture2D texture, Vector2 uv1, Vector2 uv2, Vector3 p1, Vector3 p2)
         {
+            // UV座標をピクセル座標に変換し、開始点の色を取得
             Vector2 pixelUV1 = new Vector2(uv1.x * (texture.width - 1), uv1.y * (texture.height - 1));
             Color color1 = texture.GetPixel((int)pixelUV1.x, (int)pixelUV1.y);
 
+            // 二分探索を用いて境界点を探す
             for (int i = 0; i < 10; i++)
             {
-                float t = 0.5f;
+                float t = 0.5f;  // 中間点の係数
+                // UV座標と頂点座標の中間点を計算
                 Vector2 midUV = Vector2.Lerp(uv1, uv2, t);
                 Vector2 midPixelUV = new Vector2(midUV.x * (texture.width - 1), midUV.y * (texture.height - 1));
                 Color midColor = texture.GetPixel((int)midPixelUV.x, (int)midPixelUV.y);
                 Vector3 midVertex = Vector3.Lerp(p1, p2, t);
 
+                // 境界条件に応じて探索範囲を狭める
                 if ((color1.a == 0 && midColor.a != 0) || (color1.a != 0 && midColor.a == 0))
                 {
                     uv2 = midUV;
@@ -389,6 +404,7 @@ namespace MeshDeletionTool
                 }
             }
 
+            // 最終的な境界点のUV座標と頂点座標を計算して返す
             Vector2 finalUV = Vector2.Lerp(uv1, uv2, 0.5f);
             Vector3 finalVertex = Vector3.Lerp(p1, p2, 0.5f);
             return (finalUV, finalVertex);

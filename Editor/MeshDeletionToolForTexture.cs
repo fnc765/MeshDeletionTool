@@ -173,16 +173,16 @@ namespace MeshDeletionTool
         // 削除対象でない頂点を多角形頂点に追加
         private (List<Vector3>, List<int>) addNonDeletableVertexToPolygon(Mesh originalMesh,
                                                                           Dictionary<int, int> oldToNewIndexMap,
-                                                                          int[] indexs, bool[] isRemoved)
+                                                                          List<(int index, bool isRemoved)> triangleIndexs)
         {
             List<Vector3> originVertices = new List<Vector3>(); //処理対象の多角形の外形頂点
             List<int> polygonToGlobalIndexMap = new List<int>();
 
             for (int index = 0; index < 3; index++) {
-                if (!isRemoved[index]) // 削除対象でない頂点を多角形頂点に追加
+                if (!triangleIndexs[index].isRemoved) // 削除対象でない頂点を多角形頂点に追加
                 {
-                    originVertices.Add(originalMesh.vertices[indexs[index]]);
-                    polygonToGlobalIndexMap.Add(oldToNewIndexMap[indexs[index]]);
+                    originVertices.Add(originalMesh.vertices[triangleIndexs[index].index]);
+                    polygonToGlobalIndexMap.Add(oldToNewIndexMap[triangleIndexs[index].index]);
                 }
             }
             return (originVertices, polygonToGlobalIndexMap);
@@ -231,45 +231,47 @@ namespace MeshDeletionTool
                 // 各三角形を確認し、必要に応じて新しい頂点を追加
                 for (int i = 0; i < triangles.Length; i += 3)
                 {
-                    int v1 = triangles[i];
-                    int v2 = triangles[i + 1];
-                    int v3 = triangles[i + 2];
-
-                    bool v1Removed = removeVerticesIndexs.Contains(v1);
-                    bool v2Removed = removeVerticesIndexs.Contains(v2);
-                    bool v3Removed = removeVerticesIndexs.Contains(v3);
+                    // 三角ポリゴンを構成する頂点インデックスと削除情報を含んだタプルを作成
+                    List<(int index, bool isRemoved)> triangleIndexs = new List<(int index, bool isRemoved)>
+                    {
+                        (triangles[i], removeVerticesIndexs.Contains(triangles[i])),
+                        (triangles[i + 1], removeVerticesIndexs.Contains(triangles[i + 1])),
+                        (triangles[i + 2], removeVerticesIndexs.Contains(triangles[i + 2]))
+                    };
 
                     // 全ての頂点が削除対象の場合、三角形を追加しない
-                    if (v1Removed && v2Removed && v3Removed)
+                    if (triangleIndexs[0].isRemoved &&
+                        triangleIndexs[1].isRemoved &&
+                        triangleIndexs[2].isRemoved)
                     {
                         continue;
                     }
                     // いずれの頂点も削除対象でない場合、三角形をそのまま追加
-                    else if (!v1Removed && !v2Removed && !v3Removed)
+                    else if ( !triangleIndexs[0].isRemoved &&
+                              !triangleIndexs[1].isRemoved &&
+                              !triangleIndexs[2].isRemoved)
                     {
                         // 先に不要頂点を削除しているため頂点インデックスを変換する必要がある
-                        newSubMeshTriangles.Add(oldToNewIndexMap[v1]);
-                        newSubMeshTriangles.Add(oldToNewIndexMap[v2]);
-                        newSubMeshTriangles.Add(oldToNewIndexMap[v3]);
+                        newSubMeshTriangles.Add(oldToNewIndexMap[triangleIndexs[0].index]);
+                        newSubMeshTriangles.Add(oldToNewIndexMap[triangleIndexs[1].index]);
+                        newSubMeshTriangles.Add(oldToNewIndexMap[triangleIndexs[2].index]);
                     }
                     // 一部の頂点が削除対象の場合
                     else
                     {
                         MeshData addMeshData = new MeshData();
 
-                        int[] indexs = { v1, v2, v3 };
-                        bool[] isRemoved = { v1Removed, v2Removed, v3Removed };
                         // 削除対象でない頂点を多角形頂点に追加
                         (List<Vector3> originVertices, List<int> polygonToGlobalIndexMap) =
-                            addNonDeletableVertexToPolygon(originalMesh, oldToNewIndexMap, indexs, isRemoved);         
+                            addNonDeletableVertexToPolygon(originalMesh, oldToNewIndexMap, triangleIndexs);         
 
                         // 新規頂点追加処理（座標および頂点に付随するデータの補完を実行し新規頂点を追加する）
                         if (texture != null)
                         {
                             List<int[]> sideIndexs = new List<int[]>(){
-                                new int[] {v1, v2},
-                                new int[] {v2, v3},
-                                new int[] {v3, v1}
+                                new int[] { triangleIndexs[0].index, triangleIndexs[1].index },
+                                new int[] { triangleIndexs[1].index, triangleIndexs[2].index },
+                                new int[] { triangleIndexs[2].index, triangleIndexs[0].index }
                             };
                             // 三角形の各辺に対して、テクスチャ境界値の計算
                             for (int triangleIndex = 0; triangleIndex < 3; triangleIndex++)
@@ -292,9 +294,9 @@ namespace MeshDeletionTool
                             if (!addVertexIndexMap.ContainsKey(vertex)) {//追加頂点の座標マップに含まれない座標の場合
                                 //TODO: 本来は継ぎ目の辺へ新規頂点追加時の判定が必要だが、簡易的に対象ポリゴン頂点がシーム頂点に含まれているかで判定している
                                 //継ぎ目の辺でないなら
-                                if (!seamVertexIndex.Contains(v1) &&
-                                    !seamVertexIndex.Contains(v2) &&
-                                    !seamVertexIndex.Contains(v3)) {
+                                if (!seamVertexIndex.Contains(triangleIndexs[0].index) &&
+                                    !seamVertexIndex.Contains(triangleIndexs[1].index) &&
+                                    !seamVertexIndex.Contains(triangleIndexs[2].index)) {
                                     addVertexIndexMap[vertex] = newMeshData.Vertices.Count;  //追加頂点の重複防止Mapに追加
                                 }
                                 newMeshData.Vertices.Add(vertex);
@@ -310,9 +312,9 @@ namespace MeshDeletionTool
                         polygonVertices.AddRange(addMeshData.Vertices);
 
                         // 処理対象の三角ポリゴンから法線ベクトルを計算し、面の向きを指定する
-                        Vector3[] basisVertices = {originalMesh.vertices[v1],
-                                                   originalMesh.vertices[v2],
-                                                   originalMesh.vertices[v3]};
+                        Vector3[] basisVertices = {originalMesh.vertices[triangleIndexs[0].index],
+                                                   originalMesh.vertices[triangleIndexs[1].index],
+                                                   originalMesh.vertices[triangleIndexs[2].index]};
                         Vector3 normal = EarClipping3D.CalculateNormal(basisVertices);
                         // 耳切り法により、多角形外周頂点から三角ポリゴンに分割し、そのインデックス番号順を返す
                         int[] triangulatedIndices = EarClipping3D.Triangulate(polygonVertices.ToArray(), normal);

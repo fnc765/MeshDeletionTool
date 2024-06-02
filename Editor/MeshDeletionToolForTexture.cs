@@ -215,6 +215,33 @@ namespace MeshDeletionTool
             return addMeshData;
         }
 
+        // 追加頂点の中で重複が無いように全体メッシュへ追加する（既存頂点はシームなどで重複がある）
+        private void addUniqueMeshData(MeshData addMeshData, List<(int index, bool isRemoved)> triangleIndexs,
+                                       HashSet<int> seamVertexIndex,
+                                       MeshData newMeshData, List<int> polygonToGlobalIndexMap, 
+                                       Dictionary<Vector3, int> addVertexIndexMap)
+        {
+            for (int j = 0; j < addMeshData.Vertices.Count; j++)
+            {
+                Vector3 vertex = addMeshData.Vertices[j];
+                Vector2 uv = addMeshData.UV[j];
+                if (!addVertexIndexMap.ContainsKey(vertex)) {//追加頂点の座標マップに含まれない座標の場合
+                    //TODO: 本来は継ぎ目の辺へ新規頂点追加時の判定が必要だが、簡易的に対象ポリゴン頂点がシーム頂点に含まれているかで判定している
+                    //継ぎ目の辺でないなら
+                    if (!seamVertexIndex.Contains(triangleIndexs[0].index) &&
+                        !seamVertexIndex.Contains(triangleIndexs[1].index) &&
+                        !seamVertexIndex.Contains(triangleIndexs[2].index)) {
+                        addVertexIndexMap[vertex] = newMeshData.Vertices.Count;  //追加頂点の重複防止Mapに追加
+                    }
+                    newMeshData.Vertices.Add(vertex);
+                    newMeshData.UV.Add(uv);
+                    polygonToGlobalIndexMap.Add(newMeshData.Vertices.Count - 1);
+                } else {
+                    polygonToGlobalIndexMap.Add(addVertexIndexMap[vertex]);
+                }
+            }
+        }
+
         private Mesh CreateMeshAfterVertexModification(Mesh originalMesh, Material[] originalMaterials, List<int> removeVerticesIndexs)
         {
             MeshData newMeshData = new MeshData();
@@ -293,26 +320,9 @@ namespace MeshDeletionTool
                         // 辺への新規頂点追加
                         MeshData addMeshData = addNewVertexToEdge(originalMesh, texture, triangleIndexs);
 
-                        // 追加頂点の中で重複が無いようにする（既存頂点はシームなどで重複がある）
-                        for (int j = 0; j < addMeshData.Vertices.Count; j++)
-                        {
-                            Vector3 vertex = addMeshData.Vertices[j];
-                            Vector2 uv = addMeshData.UV[j];
-                            if (!addVertexIndexMap.ContainsKey(vertex)) {//追加頂点の座標マップに含まれない座標の場合
-                                //TODO: 本来は継ぎ目の辺へ新規頂点追加時の判定が必要だが、簡易的に対象ポリゴン頂点がシーム頂点に含まれているかで判定している
-                                //継ぎ目の辺でないなら
-                                if (!seamVertexIndex.Contains(triangleIndexs[0].index) &&
-                                    !seamVertexIndex.Contains(triangleIndexs[1].index) &&
-                                    !seamVertexIndex.Contains(triangleIndexs[2].index)) {
-                                    addVertexIndexMap[vertex] = newMeshData.Vertices.Count;  //追加頂点の重複防止Mapに追加
-                                }
-                                newMeshData.Vertices.Add(vertex);
-                                newMeshData.UV.Add(uv);
-                                polygonToGlobalIndexMap.Add(newMeshData.Vertices.Count - 1);
-                            } else {
-                                polygonToGlobalIndexMap.Add(addVertexIndexMap[vertex]);
-                            }
-                        }
+                        // 追加頂点の中で重複が無いように全体メッシュへ追加する（既存頂点はシームなどで重複がある）
+                        addUniqueMeshData(addMeshData, triangleIndexs, seamVertexIndex,
+                                          newMeshData, polygonToGlobalIndexMap, addVertexIndexMap);
 
                         List<Vector3> polygonVertices = new List<Vector3>(); //処理対象の多角形の外形頂点
                         polygonVertices.AddRange(originVertices);

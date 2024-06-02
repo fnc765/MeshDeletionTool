@@ -255,8 +255,7 @@ namespace MeshDeletionTool
                     // 一部の頂点が削除対象の場合
                     else
                     {
-                        List<Vector3> addVertices = new List<Vector3>(); //処理対象の多角形の外形頂点
-                        List<Vector2> addUVs = new List<Vector2>();
+                        MeshData addMeshData = new MeshData();
 
                         int[] indexs = { v1, v2, v3 };
                         bool[] isRemoved = { v1Removed, v2Removed, v3Removed };
@@ -279,17 +278,17 @@ namespace MeshDeletionTool
                                     AddEdgeIntersectionPoints(originalMesh, texture, sideIndexs[triangleIndex]);
                                 if (newVertex.HasValue) // テクスチャ境界値があるなら
                                 {
-                                    addVertices.Add(newVertex.Value); //多角形頂点に追加
-                                    addUVs.Add(newUV.Value);  // UVも追加
+                                    addMeshData.Vertices.Add(newVertex.Value); //多角形頂点に追加
+                                    addMeshData.UV.Add(newUV.Value);  // UVも追加
                                 }
                             }
                         }
 
                         // 追加頂点の中で重複が無いようにする（既存頂点はシームなどで重複がある）
-                        for (int j = 0; j < addVertices.Count; j++)
+                        for (int j = 0; j < addMeshData.Vertices.Count; j++)
                         {
-                            Vector3 vertex = addVertices[j];
-                            Vector2 uv = addUVs[j];
+                            Vector3 vertex = addMeshData.Vertices[j];
+                            Vector2 uv = addMeshData.UV[j];
                             if (!addVertexIndexMap.ContainsKey(vertex)) {//追加頂点の座標マップに含まれない座標の場合
                                 //TODO: 本来は継ぎ目の辺へ新規頂点追加時の判定が必要だが、簡易的に対象ポリゴン頂点がシーム頂点に含まれているかで判定している
                                 //継ぎ目の辺でないなら
@@ -308,7 +307,7 @@ namespace MeshDeletionTool
 
                         List<Vector3> polygonVertices = new List<Vector3>(); //処理対象の多角形の外形頂点
                         polygonVertices.AddRange(originVertices);
-                        polygonVertices.AddRange(addVertices);
+                        polygonVertices.AddRange(addMeshData.Vertices);
 
                         // 処理対象の三角ポリゴンから法線ベクトルを計算し、面の向きを指定する
                         Vector3[] basisVertices = {originalMesh.vertices[v1],

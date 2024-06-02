@@ -242,6 +242,32 @@ namespace MeshDeletionTool
             }
         }
 
+        // 多角形頂点から三角ポリゴンに変換し頂点配列を返す
+        private int[] createTriangleFromPolygon(Mesh originalMesh, List<(int index, bool isRemoved)> triangleIndexs, List<Vector3> polygonVertices)
+        {
+            // 処理対象の三角ポリゴンから法線ベクトルを計算し、面の向きを指定する
+            Vector3[] basisVertices = {originalMesh.vertices[triangleIndexs[0].index],
+                                        originalMesh.vertices[triangleIndexs[1].index],
+                                        originalMesh.vertices[triangleIndexs[2].index]};
+            Vector3 normal = EarClipping3D.CalculateNormal(basisVertices);
+            // 耳切り法により、多角形外周頂点から三角ポリゴンに分割し、そのインデックス番号順を返す
+            int[] triangulatedIndices = EarClipping3D.Triangulate(polygonVertices.ToArray(), normal);
+            return triangulatedIndices;
+        }
+
+        // 多角形ポリゴンの頂点インデックスを全体頂点インデックスに変換する
+        private List<int> convertIndexToGlobal(int[] triangulatedIndices, List<int> polygonToGlobalIndexMap)
+        {
+            List<int> polygonTriangles = new List<int>();
+            for (int j = 0; j < triangulatedIndices.Length; j++)
+            {
+                int polygonIndex = triangulatedIndices[j];
+                // 三角ポリゴンのインデックス番号を変換して追加
+                polygonTriangles.Add(polygonToGlobalIndexMap[polygonIndex]);
+            }
+            return polygonTriangles;
+        }
+
         private Mesh CreateMeshAfterVertexModification(Mesh originalMesh, Material[] originalMaterials, List<int> removeVerticesIndexs)
         {
             MeshData newMeshData = new MeshData();
@@ -320,28 +346,21 @@ namespace MeshDeletionTool
                         // 辺への新規頂点追加
                         MeshData addMeshData = addNewVertexToEdge(originalMesh, texture, triangleIndexs);
 
-                        // 追加頂点の中で重複が無いように全体メッシュへ追加する（既存頂点はシームなどで重複がある）
+                        // 追加頂点の中で重複が無いように全体メッシュへ頂点を追加する（既存頂点はシームなどで重複がある）
                         addUniqueMeshData(addMeshData, triangleIndexs, seamVertexIndex,
                                           newMeshData, polygonToGlobalIndexMap, addVertexIndexMap);
 
-                        List<Vector3> polygonVertices = new List<Vector3>(); //処理対象の多角形の外形頂点
+                        // 処理対象の多角形の外形頂点としてまとめる
+                        List<Vector3> polygonVertices = new List<Vector3>();
                         polygonVertices.AddRange(originVertices);
                         polygonVertices.AddRange(addMeshData.Vertices);
 
-                        // 処理対象の三角ポリゴンから法線ベクトルを計算し、面の向きを指定する
-                        Vector3[] basisVertices = {originalMesh.vertices[triangleIndexs[0].index],
-                                                   originalMesh.vertices[triangleIndexs[1].index],
-                                                   originalMesh.vertices[triangleIndexs[2].index]};
-                        Vector3 normal = EarClipping3D.CalculateNormal(basisVertices);
-                        // 耳切り法により、多角形外周頂点から三角ポリゴンに分割し、そのインデックス番号順を返す
-                        int[] triangulatedIndices = EarClipping3D.Triangulate(polygonVertices.ToArray(), normal);
-
-                        for (int j = 0; j < triangulatedIndices.Length; j++)
-                        {
-                            int polygonIndex = triangulatedIndices[j];
-                            // 全体のTrianglesに先ほど計算した三角ポリゴンをインデックス番号を変換して追加
-                            newSubMeshTriangles.Add(polygonToGlobalIndexMap[polygonIndex]);
-                        }
+                        // 多角形頂点から三角ポリゴンに変換し頂点インデックス配列を返す
+                        int[] triangulatedIndices = createTriangleFromPolygon(originalMesh, triangleIndexs, polygonVertices);
+                        // 三角ポリゴンの頂点インデックス配列を全体頂点インデックスに変換する
+                        List<int> polygonTriangles = convertIndexToGlobal(triangulatedIndices, polygonToGlobalIndexMap);
+                        // サブメッシュの三角ポリゴン配列に追加
+                        newSubMeshTriangles.AddRange(polygonTriangles);
                     }
                 }
                 newMesh.SetVertices(newMeshData.Vertices.ToList());

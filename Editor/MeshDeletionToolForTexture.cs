@@ -188,6 +188,33 @@ namespace MeshDeletionTool
             return (originVertices, polygonToGlobalIndexMap);
         }
 
+        // 辺への新規頂点追加
+        private MeshData addNewVertexToEdge(Mesh originalMesh, Texture2D texture,
+                                            List<(int index, bool isRemoved)> triangleIndexs)
+        {
+            MeshData addMeshData = new MeshData();
+            if (texture != null)
+            {
+                List<int[]> sideIndexs = new List<int[]>(){
+                    new int[] { triangleIndexs[0].index, triangleIndexs[1].index },
+                    new int[] { triangleIndexs[1].index, triangleIndexs[2].index },
+                    new int[] { triangleIndexs[2].index, triangleIndexs[0].index }
+                };
+                // 三角形の各辺に対して、テクスチャ境界値の座標&UV座標の計算
+                for (int triangleIndex = 0; triangleIndex < 3; triangleIndex++)
+                {
+                    (Vector2? newUV, Vector3? newVertex) = 
+                        AddEdgeIntersectionPoints(originalMesh, texture, sideIndexs[triangleIndex]);
+                    if (newVertex.HasValue) // テクスチャ境界値があるなら
+                    {
+                        addMeshData.Vertices.Add(newVertex.Value); //多角形頂点に追加
+                        addMeshData.UV.Add(newUV.Value);  // UVも追加
+                    }
+                }
+            }
+            return addMeshData;
+        }
+
         private Mesh CreateMeshAfterVertexModification(Mesh originalMesh, Material[] originalMaterials, List<int> removeVerticesIndexs)
         {
             MeshData newMeshData = new MeshData();
@@ -259,32 +286,12 @@ namespace MeshDeletionTool
                     // 一部の頂点が削除対象の場合
                     else
                     {
-                        MeshData addMeshData = new MeshData();
-
                         // 削除対象でない頂点を多角形頂点に追加
                         (List<Vector3> originVertices, List<int> polygonToGlobalIndexMap) =
                             addNonDeletableVertexToPolygon(originalMesh, oldToNewIndexMap, triangleIndexs);         
 
-                        // 新規頂点追加処理（座標および頂点に付随するデータの補完を実行し新規頂点を追加する）
-                        if (texture != null)
-                        {
-                            List<int[]> sideIndexs = new List<int[]>(){
-                                new int[] { triangleIndexs[0].index, triangleIndexs[1].index },
-                                new int[] { triangleIndexs[1].index, triangleIndexs[2].index },
-                                new int[] { triangleIndexs[2].index, triangleIndexs[0].index }
-                            };
-                            // 三角形の各辺に対して、テクスチャ境界値の計算
-                            for (int triangleIndex = 0; triangleIndex < 3; triangleIndex++)
-                            {
-                                (Vector2? newUV, Vector3? newVertex) = 
-                                    AddEdgeIntersectionPoints(originalMesh, texture, sideIndexs[triangleIndex]);
-                                if (newVertex.HasValue) // テクスチャ境界値があるなら
-                                {
-                                    addMeshData.Vertices.Add(newVertex.Value); //多角形頂点に追加
-                                    addMeshData.UV.Add(newUV.Value);  // UVも追加
-                                }
-                            }
-                        }
+                        // 辺への新規頂点追加
+                        MeshData addMeshData = addNewVertexToEdge(originalMesh, texture, triangleIndexs);
 
                         // 追加頂点の中で重複が無いようにする（既存頂点はシームなどで重複がある）
                         for (int j = 0; j < addMeshData.Vertices.Count; j++)

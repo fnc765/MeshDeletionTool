@@ -190,8 +190,7 @@ namespace MeshDeletionTool
 
         private Mesh CreateMeshAfterVertexModification(Mesh originalMesh, Material[] originalMaterials, List<int> removeVerticesIndexs)
         {
-            List<Vector3> newVertices = new List<Vector3>();
-            List<Vector2> newUVs = new List<Vector2>();
+            MeshData newMeshData = new MeshData();
 
             // 新規追加頂点の重複を避けるためにマッピング
             Dictionary<Vector3, int> addVertexIndexMap = new Dictionary<Vector3, int>();
@@ -205,8 +204,8 @@ namespace MeshDeletionTool
                     continue;
 
                 Vector3 vertex = originalMesh.vertices[index];
-                newVertices.Add(vertex);
-                newUVs.Add(originalMesh.uv[index]);
+                newMeshData.Vertices.Add(vertex);
+                newMeshData.UV.Add(originalMesh.uv[index]);
             }
             
             // 重複している頂点(シーム)のインデックスリストを作成
@@ -297,11 +296,11 @@ namespace MeshDeletionTool
                                 if (!seamVertexIndex.Contains(v1) &&
                                     !seamVertexIndex.Contains(v2) &&
                                     !seamVertexIndex.Contains(v3)) {
-                                    addVertexIndexMap[vertex] = newVertices.Count;  //追加頂点の重複防止Mapに追加
+                                    addVertexIndexMap[vertex] = newMeshData.Vertices.Count;  //追加頂点の重複防止Mapに追加
                                 }
-                                newVertices.Add(vertex);
-                                newUVs.Add(uv);
-                                polygonToGlobalIndexMap.Add(newVertices.Count - 1);
+                                newMeshData.Vertices.Add(vertex);
+                                newMeshData.UV.Add(uv);
+                                polygonToGlobalIndexMap.Add(newMeshData.Vertices.Count - 1);
                             } else {
                                 polygonToGlobalIndexMap.Add(addVertexIndexMap[vertex]);
                             }
@@ -327,8 +326,8 @@ namespace MeshDeletionTool
                         }
                     }
                 }
-                newMesh.SetVertices(newVertices.ToList());
-                newMesh.SetUVs(0, newUVs.ToList());
+                newMesh.SetVertices(newMeshData.Vertices.ToList());
+                newMesh.SetUVs(0, newMeshData.UV.ToList());
                 newMesh.SetTriangles(newSubMeshTriangles, addSubMeshIndex++);
             }
 

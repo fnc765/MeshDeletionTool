@@ -416,33 +416,34 @@ namespace MeshDeletionTool
             Vector2 pixelUV1 = new Vector2(uv1.x * (texture.width - 1), uv1.y * (texture.height - 1));
             Color color1 = texture.GetPixel((int)pixelUV1.x, (int)pixelUV1.y);
 
+            float tMin = 0.0f;
+            float tMax = 1.0f;
+            
             // 二分探索を用いて境界点を探す
             for (int i = 0; i < 10; i++)
             {
-                float t = 0.5f;  // 中間点の係数
+                float t = (tMin + tMax) / 2.0f;  // 中間点の係数
                 // UV座標と頂点座標の中間点を計算
                 Vector2 midUV = Vector2.Lerp(uv1, uv2, t);
                 Vector2 midPixelUV = new Vector2(midUV.x * (texture.width - 1), midUV.y * (texture.height - 1));
                 Color midColor = texture.GetPixel((int)midPixelUV.x, (int)midPixelUV.y);
-                Vector3 midVertex = Vector3.Lerp(p1, p2, t);
 
                 // 境界条件に応じて探索範囲を狭める
                 if ((color1.a == 0 && midColor.a != 0) || (color1.a != 0 && midColor.a == 0))
                 {
-                    uv2 = midUV;
-                    p2 = midVertex;
+                    tMax = t; // 境界があると考えられる範囲を左側に絞り込む
                 }
                 else
                 {
-                    uv1 = midUV;
+                    tMin = t; // 境界があると考えられる範囲を右側に絞り込む
                     color1 = midColor;
-                    p1 = midVertex;
                 }
             }
 
             // 最終的な境界点のUV座標と頂点座標を計算して返す
-            Vector2 finalUV = Vector2.Lerp(uv1, uv2, 0.5f);
-            Vector3 finalVertex = Vector3.Lerp(p1, p2, 0.5f);
+            float finalT = (tMin + tMax) / 2.0f;
+            Vector2 finalUV = Vector2.Lerp(uv1, uv2, finalT);
+            Vector3 finalVertex = Vector3.Lerp(p1, p2, finalT);
             return (finalUV, finalVertex);
         }
     }

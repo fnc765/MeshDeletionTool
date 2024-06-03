@@ -132,142 +132,7 @@ namespace MeshDeletionTool
             return removeVerticesIndexs;
         }
 
-        // 重複している頂点(シーム)のインデックスリストを作成
-        private HashSet<int> CreateSeamIndex(Mesh mesh)
-        {
-            Dictionary<Vector3, int> seamVertex = new Dictionary<Vector3, int>();
-            HashSet<int> seamVertexIndex = new HashSet<int>();
-
-            for (int index = 0; index < mesh.vertexCount; index++)
-            {
-                Vector3 vertex = mesh.vertices[index];
-                // シームの頂点かどうかをチェックし、インデックスを格納
-                if (seamVertex.ContainsKey(vertex))
-                {
-                    seamVertexIndex.Add(seamVertex[vertex]); // 既に存在する頂点なので、そのインデックスを追加
-                    seamVertexIndex.Add(index); // 現在のインデックスも追加
-                }
-                else
-                {
-                    seamVertex.Add(vertex, index); // 新しい頂点を追加
-                }
-            }
-            return seamVertexIndex;
-        }
-
-        // インデックスマッピングの作成
-        private Dictionary<int, int> CreateIndexMap(Mesh originalMesh, List<int> removeVerticesIndexs)
-        {
-            Dictionary<int, int> oldToNewIndexMap = new Dictionary<int, int>();
-            for (int oldIndex = 0, newIndex = 0; oldIndex < originalMesh.vertexCount; oldIndex++)
-            {
-                if (!removeVerticesIndexs.Contains(oldIndex))
-                {
-                    oldToNewIndexMap[oldIndex] = newIndex;
-                    newIndex++;
-                }
-            }
-            return oldToNewIndexMap;
-        }
-
-        // 削除対象でない頂点を多角形頂点に追加
-        private (List<Vector3>, List<int>) addNonDeletableVertexToPolygon(Mesh originalMesh,
-                                                                          Dictionary<int, int> oldToNewIndexMap,
-                                                                          List<(int index, bool isRemoved)> triangleIndexs)
-        {
-            List<Vector3> originVertices = new List<Vector3>(); //処理対象の多角形の外形頂点
-            List<int> polygonToGlobalIndexMap = new List<int>();
-
-            for (int index = 0; index < 3; index++) {
-                if (!triangleIndexs[index].isRemoved) // 削除対象でない頂点を多角形頂点に追加
-                {
-                    originVertices.Add(originalMesh.vertices[triangleIndexs[index].index]);
-                    polygonToGlobalIndexMap.Add(oldToNewIndexMap[triangleIndexs[index].index]);
-                }
-            }
-            return (originVertices, polygonToGlobalIndexMap);
-        }
-
-        // 辺への新規頂点追加
-        private MeshData addNewVertexToEdge(Mesh originalMesh, Texture2D texture,
-                                            List<(int index, bool isRemoved)> triangleIndexs)
-        {
-            MeshData addMeshData = new MeshData();
-            if (texture != null)
-            {
-                List<int[]> sideIndexs = new List<int[]>(){
-                    new int[] { triangleIndexs[0].index, triangleIndexs[1].index },
-                    new int[] { triangleIndexs[1].index, triangleIndexs[2].index },
-                    new int[] { triangleIndexs[2].index, triangleIndexs[0].index }
-                };
-                // 三角形の各辺に対して、テクスチャ境界値の座標&UV座標の計算
-                for (int triangleIndex = 0; triangleIndex < 3; triangleIndex++)
-                {
-                    (Vector2? newUV, Vector3? newVertex) = 
-                        AddEdgeIntersectionPoints(originalMesh, texture, sideIndexs[triangleIndex]);
-                    if (newVertex.HasValue) // テクスチャ境界値があるなら
-                    {
-                        addMeshData.Vertices.Add(newVertex.Value); //多角形頂点に追加
-                        addMeshData.UV.Add(newUV.Value);  // UVも追加
-                    }
-                }
-            }
-            return addMeshData;
-        }
-
-        // 追加頂点の中で重複が無いように全体メッシュへ追加する（既存頂点はシームなどで重複がある）
-        private void addUniqueMeshData(MeshData addMeshData, List<(int index, bool isRemoved)> triangleIndexs,
-                                       HashSet<int> seamVertexIndex,
-                                       MeshData newMeshData, List<int> polygonToGlobalIndexMap, 
-                                       Dictionary<Vector3, int> addVertexIndexMap)
-        {
-            for (int j = 0; j < addMeshData.Vertices.Count; j++)
-            {
-                Vector3 vertex = addMeshData.Vertices[j];
-                Vector2 uv = addMeshData.UV[j];
-                if (!addVertexIndexMap.ContainsKey(vertex)) {//追加頂点の座標マップに含まれない座標の場合
-                    //TODO: 本来は継ぎ目の辺へ新規頂点追加時の判定が必要だが、簡易的に対象ポリゴン頂点がシーム頂点に含まれているかで判定している
-                    //継ぎ目の辺でないなら
-                    if (!seamVertexIndex.Contains(triangleIndexs[0].index) &&
-                        !seamVertexIndex.Contains(triangleIndexs[1].index) &&
-                        !seamVertexIndex.Contains(triangleIndexs[2].index)) {
-                        addVertexIndexMap[vertex] = newMeshData.Vertices.Count;  //追加頂点の重複防止Mapに追加
-                    }
-                    newMeshData.Vertices.Add(vertex);
-                    newMeshData.UV.Add(uv);
-                    polygonToGlobalIndexMap.Add(newMeshData.Vertices.Count - 1);
-                } else {
-                    polygonToGlobalIndexMap.Add(addVertexIndexMap[vertex]);
-                }
-            }
-        }
-
-        // 多角形頂点から三角ポリゴンに変換し頂点配列を返す
-        private int[] createTriangleFromPolygon(Mesh originalMesh, List<(int index, bool isRemoved)> triangleIndexs, List<Vector3> polygonVertices)
-        {
-            // 処理対象の三角ポリゴンから法線ベクトルを計算し、面の向きを指定する
-            Vector3[] basisVertices = {originalMesh.vertices[triangleIndexs[0].index],
-                                        originalMesh.vertices[triangleIndexs[1].index],
-                                        originalMesh.vertices[triangleIndexs[2].index]};
-            Vector3 normal = EarClipping3D.CalculateNormal(basisVertices);
-            // 耳切り法により、多角形外周頂点から三角ポリゴンに分割し、そのインデックス番号順を返す
-            int[] triangulatedIndices = EarClipping3D.Triangulate(polygonVertices.ToArray(), normal);
-            return triangulatedIndices;
-        }
-
-        // 多角形ポリゴンの頂点インデックスを全体頂点インデックスに変換する
-        private List<int> convertIndexToGlobal(int[] triangulatedIndices, List<int> polygonToGlobalIndexMap)
-        {
-            List<int> polygonTriangles = new List<int>();
-            for (int j = 0; j < triangulatedIndices.Length; j++)
-            {
-                int polygonIndex = triangulatedIndices[j];
-                // 三角ポリゴンのインデックス番号を変換して追加
-                polygonTriangles.Add(polygonToGlobalIndexMap[polygonIndex]);
-            }
-            return polygonTriangles;
-        }
-
+        // 頂点削除と頂点追加を行いテクスチャに合わせたメッシュ形状に編集する
         private Mesh CreateMeshAfterVertexModification(Mesh originalMesh, Material[] originalMaterials, List<int> removeVerticesIndexs)
         {
             MeshData newMeshData = new MeshData();
@@ -373,6 +238,89 @@ namespace MeshDeletionTool
             return newMesh;
         }
 
+        // 重複している頂点(シーム)のインデックスリストを作成 
+        private HashSet<int> CreateSeamIndex(Mesh mesh)
+        {
+            Dictionary<Vector3, int> seamVertex = new Dictionary<Vector3, int>();
+            HashSet<int> seamVertexIndex = new HashSet<int>();
+
+            for (int index = 0; index < mesh.vertexCount; index++)
+            {
+                Vector3 vertex = mesh.vertices[index];
+                // シームの頂点かどうかをチェックし、インデックスを格納
+                if (seamVertex.ContainsKey(vertex))
+                {
+                    seamVertexIndex.Add(seamVertex[vertex]); // 既に存在する頂点なので、そのインデックスを追加
+                    seamVertexIndex.Add(index); // 現在のインデックスも追加
+                }
+                else
+                {
+                    seamVertex.Add(vertex, index); // 新しい頂点を追加
+                }
+            }
+            return seamVertexIndex;
+        }
+
+        // インデックスマッピングの作成
+        private Dictionary<int, int> CreateIndexMap(Mesh originalMesh, List<int> removeVerticesIndexs)
+        {
+            Dictionary<int, int> oldToNewIndexMap = new Dictionary<int, int>();
+            for (int oldIndex = 0, newIndex = 0; oldIndex < originalMesh.vertexCount; oldIndex++)
+            {
+                if (!removeVerticesIndexs.Contains(oldIndex))
+                {
+                    oldToNewIndexMap[oldIndex] = newIndex;
+                    newIndex++;
+                }
+            }
+            return oldToNewIndexMap;
+        }
+
+        // 削除対象でない頂点を多角形頂点に追加
+        private (List<Vector3>, List<int>) addNonDeletableVertexToPolygon(Mesh originalMesh,
+                                                                          Dictionary<int, int> oldToNewIndexMap,
+                                                                          List<(int index, bool isRemoved)> triangleIndexs)
+        {
+            List<Vector3> originVertices = new List<Vector3>(); //処理対象の多角形の外形頂点
+            List<int> polygonToGlobalIndexMap = new List<int>();
+
+            for (int index = 0; index < 3; index++) {
+                if (!triangleIndexs[index].isRemoved) // 削除対象でない頂点を多角形頂点に追加
+                {
+                    originVertices.Add(originalMesh.vertices[triangleIndexs[index].index]);
+                    polygonToGlobalIndexMap.Add(oldToNewIndexMap[triangleIndexs[index].index]);
+                }
+            }
+            return (originVertices, polygonToGlobalIndexMap);
+        }
+
+        // 辺への新規頂点追加
+        private MeshData addNewVertexToEdge(Mesh originalMesh, Texture2D texture,
+                                            List<(int index, bool isRemoved)> triangleIndexs)
+        {
+            MeshData addMeshData = new MeshData();
+            if (texture != null)
+            {
+                List<int[]> sideIndexs = new List<int[]>(){
+                    new int[] { triangleIndexs[0].index, triangleIndexs[1].index },
+                    new int[] { triangleIndexs[1].index, triangleIndexs[2].index },
+                    new int[] { triangleIndexs[2].index, triangleIndexs[0].index }
+                };
+                // 三角形の各辺に対して、テクスチャ境界値の座標&UV座標の計算
+                for (int triangleIndex = 0; triangleIndex < 3; triangleIndex++)
+                {
+                    (Vector2? newUV, Vector3? newVertex) = 
+                        AddEdgeIntersectionPoints(originalMesh, texture, sideIndexs[triangleIndex]);
+                    if (newVertex.HasValue) // テクスチャ境界値があるなら
+                    {
+                        addMeshData.Vertices.Add(newVertex.Value); //多角形頂点に追加
+                        addMeshData.UV.Add(newUV.Value);  // UVも追加
+                    }
+                }
+            }
+            return addMeshData;
+        }
+
         // originalMeshのエッジとテクスチャの境界点を検出し、エッジ交点のUV座標と新しい頂点座標を返す関数
         private (Vector2? finalUV, Vector3? newVertex) AddEdgeIntersectionPoints(Mesh originalMesh, Texture2D texture, int[] indexs)
         {
@@ -445,6 +393,59 @@ namespace MeshDeletionTool
             Vector2 finalUV = Vector2.Lerp(uv1, uv2, finalT);
             Vector3 finalVertex = Vector3.Lerp(p1, p2, finalT);
             return (finalUV, finalVertex);
+        }
+
+        // 追加頂点の中で重複が無いように全体メッシュへ追加する（既存頂点はシームなどで重複がある）
+        private void addUniqueMeshData(MeshData addMeshData, List<(int index, bool isRemoved)> triangleIndexs,
+                                       HashSet<int> seamVertexIndex,
+                                       MeshData newMeshData, List<int> polygonToGlobalIndexMap, 
+                                       Dictionary<Vector3, int> addVertexIndexMap)
+        {
+            for (int j = 0; j < addMeshData.Vertices.Count; j++)
+            {
+                Vector3 vertex = addMeshData.Vertices[j];
+                Vector2 uv = addMeshData.UV[j];
+                if (!addVertexIndexMap.ContainsKey(vertex)) {//追加頂点の座標マップに含まれない座標の場合
+                    //TODO: 本来は継ぎ目の辺へ新規頂点追加時の判定が必要だが、簡易的に対象ポリゴン頂点がシーム頂点に含まれているかで判定している
+                    //継ぎ目の辺でないなら
+                    if (!seamVertexIndex.Contains(triangleIndexs[0].index) &&
+                        !seamVertexIndex.Contains(triangleIndexs[1].index) &&
+                        !seamVertexIndex.Contains(triangleIndexs[2].index)) {
+                        addVertexIndexMap[vertex] = newMeshData.Vertices.Count;  //追加頂点の重複防止Mapに追加
+                    }
+                    newMeshData.Vertices.Add(vertex);
+                    newMeshData.UV.Add(uv);
+                    polygonToGlobalIndexMap.Add(newMeshData.Vertices.Count - 1);
+                } else {
+                    polygonToGlobalIndexMap.Add(addVertexIndexMap[vertex]);
+                }
+            }
+        }
+
+        // 多角形頂点から三角ポリゴンに変換し頂点配列を返す
+        private int[] createTriangleFromPolygon(Mesh originalMesh, List<(int index, bool isRemoved)> triangleIndexs, List<Vector3> polygonVertices)
+        {
+            // 処理対象の三角ポリゴンから法線ベクトルを計算し、面の向きを指定する
+            Vector3[] basisVertices = {originalMesh.vertices[triangleIndexs[0].index],
+                                        originalMesh.vertices[triangleIndexs[1].index],
+                                        originalMesh.vertices[triangleIndexs[2].index]};
+            Vector3 normal = EarClipping3D.CalculateNormal(basisVertices);
+            // 耳切り法により、多角形外周頂点から三角ポリゴンに分割し、そのインデックス番号順を返す
+            int[] triangulatedIndices = EarClipping3D.Triangulate(polygonVertices.ToArray(), normal);
+            return triangulatedIndices;
+        }
+
+        // 多角形ポリゴンの頂点インデックスを全体頂点インデックスに変換する
+        private List<int> convertIndexToGlobal(int[] triangulatedIndices, List<int> polygonToGlobalIndexMap)
+        {
+            List<int> polygonTriangles = new List<int>();
+            for (int j = 0; j < triangulatedIndices.Length; j++)
+            {
+                int polygonIndex = triangulatedIndices[j];
+                // 三角ポリゴンのインデックス番号を変換して追加
+                polygonTriangles.Add(polygonToGlobalIndexMap[polygonIndex]);
+            }
+            return polygonTriangles;
         }
     }
 }

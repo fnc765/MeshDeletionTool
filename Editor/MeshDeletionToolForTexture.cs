@@ -334,8 +334,8 @@ namespace MeshDeletionTool
             if (IsBoundaryEdge(texture, uv1, uv2))
             {
                 // 境界エッジの場合、境界点のUV座標と頂点座標を計算
-                (Vector2? finalUV, Vector3 newVertex) = FindAlphaBoundary(texture, uv1, uv2, p1, p2);
-                return (finalUV, newVertex);
+                MeshData newMeshDataVertex = FindAlphaBoundary(originalMesh, texture, indexs);
+                return (newMeshDataVertex.UV[0], newMeshDataVertex.Vertices[0]);
             }
 
             // 境界エッジでない場合はnullを返す
@@ -358,8 +358,10 @@ namespace MeshDeletionTool
         }
 
         // テクスチャのアルファ値に基づき、エッジ上の境界点のUV座標と頂点座標を探す関数
-        private (Vector2 uv, Vector3 vertex) FindAlphaBoundary(Texture2D texture, Vector2 uv1, Vector2 uv2, Vector3 p1, Vector3 p2)
+        private MeshData FindAlphaBoundary(Mesh originalMesh, Texture2D texture, int[] indexs)
         {
+            Vector2 uv1 = originalMesh.uv[indexs[0]];
+            Vector2 uv2 = originalMesh.uv[indexs[1]];
             // UV座標をピクセル座標に変換し、開始点の色を取得
             Vector2 pixelUV1 = new Vector2(uv1.x * (texture.width - 1), uv1.y * (texture.height - 1));
             Color color1 = texture.GetPixel((int)pixelUV1.x, (int)pixelUV1.y);
@@ -390,9 +392,11 @@ namespace MeshDeletionTool
 
             // 最終的な境界点のUV座標と頂点座標を計算して返す
             float finalT = (tMin + tMax) / 2.0f;
-            Vector2 finalUV = Vector2.Lerp(uv1, uv2, finalT);
-            Vector3 finalVertex = Vector3.Lerp(p1, p2, finalT);
-            return (finalUV, finalVertex);
+            MeshData newMeshDataVertex = new MeshData();
+
+            newMeshDataVertex.Vertices.Add(Vector3.Lerp(originalMesh.vertices[indexs[0]], originalMesh.vertices[indexs[1]], finalT));
+            newMeshDataVertex.UV.Add(Vector2.Lerp(originalMesh.uv[indexs[0]], originalMesh.uv[indexs[1]], finalT));
+            return newMeshDataVertex;
         }
 
         // 追加頂点の中で重複が無いように全体メッシュへ追加する（既存頂点はシームなどで重複がある）

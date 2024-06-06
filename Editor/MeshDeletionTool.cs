@@ -283,6 +283,69 @@ namespace MeshDeletionTool
             public List<Color32> Colors32 { get; set; } = new List<Color32>();
             public List<BoneWeight> BoneWeights { get; set; } = new List<BoneWeight>();
             public List<int> Triangles { get; set; } = new List<int>();
+
+            public void Add(MeshData meshData)
+            {
+                if (meshData == null)
+                {
+                    return;
+                }
+
+                if (meshData.Vertices != null && meshData.Vertices.Count > 0)
+                {
+                    this.Vertices.AddRange(meshData.Vertices);
+                }
+
+                if (meshData.Normals != null && meshData.Normals.Count > 0)
+                {
+                    this.Normals.AddRange(meshData.Normals);
+                }
+
+                if (meshData.Tangents != null && meshData.Tangents.Count > 0)
+                {
+                    this.Tangents.AddRange(meshData.Tangents);
+                }
+
+                if (meshData.UV != null && meshData.UV.Count > 0)
+                {
+                    this.UV.AddRange(meshData.UV);
+                }
+
+                if (meshData.UV2 != null && meshData.UV2.Count > 0)
+                {
+                    this.UV2.AddRange(meshData.UV2);
+                }
+
+                if (meshData.UV3 != null && meshData.UV3.Count > 0)
+                {
+                    this.UV3.AddRange(meshData.UV3);
+                }
+
+                if (meshData.UV4 != null && meshData.UV4.Count > 0)
+                {
+                    this.UV4.AddRange(meshData.UV4);
+                }
+
+                if (meshData.Colors != null && meshData.Colors.Count > 0)
+                {
+                    this.Colors.AddRange(meshData.Colors);
+                }
+
+                if (meshData.Colors32 != null && meshData.Colors32.Count > 0)
+                {
+                    this.Colors32.AddRange(meshData.Colors32);
+                }
+
+                if (meshData.BoneWeights != null && meshData.BoneWeights.Count > 0)
+                {
+                    this.BoneWeights.AddRange(meshData.BoneWeights);
+                }
+
+                if (meshData.Triangles != null && meshData.Triangles.Count > 0)
+                {
+                    this.Triangles.AddRange(meshData.Triangles);
+                }
+            }
         }
     }
 }

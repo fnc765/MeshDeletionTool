@@ -309,12 +309,11 @@ namespace MeshDeletionTool
                 // 三角形の各辺に対して、テクスチャ境界値の座標&UV座標の計算
                 for (int triangleIndex = 0; triangleIndex < 3; triangleIndex++)
                 {
-                    (Vector2? newUV, Vector3? newVertex) = 
+                    MeshData newMeshDataVertex = 
                         AddEdgeIntersectionPoints(originalMesh, texture, sideIndexs[triangleIndex]);
-                    if (newVertex.HasValue) // テクスチャ境界値があるなら
+                    if (newMeshDataVertex.Vertices.Count > 0) // テクスチャ境界値があるなら
                     {
-                        addMeshData.Vertices.Add(newVertex.Value); //多角形頂点に追加
-                        addMeshData.UV.Add(newUV.Value);  // UVも追加
+                        addMeshData.Add(newMeshDataVertex); //多角形頂点に追加
                     }
                 }
             }
@@ -322,24 +321,21 @@ namespace MeshDeletionTool
         }
 
         // originalMeshのエッジとテクスチャの境界点を検出し、エッジ交点のUV座標と新しい頂点座標を返す関数
-        private (Vector2? finalUV, Vector3? newVertex) AddEdgeIntersectionPoints(Mesh originalMesh, Texture2D texture, int[] indexs)
+        private MeshData AddEdgeIntersectionPoints(Mesh originalMesh, Texture2D texture, int[] indexs)
         {
-            // エッジの両端点の3D座標とUV座標を取得
-            Vector3 p1 = originalMesh.vertices[indexs[0]];
-            Vector3 p2 = originalMesh.vertices[indexs[1]];
+            // エッジの両端点のUV座標を取得
             Vector2 uv1 = originalMesh.uv[indexs[0]];
             Vector2 uv2 = originalMesh.uv[indexs[1]];
+            MeshData newMeshDataVertex = new MeshData();
 
             // エッジが境界エッジかどうかを判定
             if (IsBoundaryEdge(texture, uv1, uv2))
             {
                 // 境界エッジの場合、境界点のUV座標と頂点座標を計算
-                MeshData newMeshDataVertex = FindAlphaBoundary(originalMesh, texture, indexs);
-                return (newMeshDataVertex.UV[0], newMeshDataVertex.Vertices[0]);
+                newMeshDataVertex = FindAlphaBoundary(originalMesh, texture, indexs);
             }
 
-            // 境界エッジでない場合はnullを返す
-            return (null, null);
+            return newMeshDataVertex;
         }
 
         // UV座標が示すテクスチャのピクセルが境界エッジかどうかを判定する関数
@@ -396,6 +392,27 @@ namespace MeshDeletionTool
 
             newMeshDataVertex.Vertices.Add(Vector3.Lerp(originalMesh.vertices[indexs[0]], originalMesh.vertices[indexs[1]], finalT));
             newMeshDataVertex.UV.Add(Vector2.Lerp(originalMesh.uv[indexs[0]], originalMesh.uv[indexs[1]], finalT));
+
+            if (indexs[0] < originalMesh.normals.Length && indexs[1] < originalMesh.normals.Length)
+                newMeshDataVertex.Normals.Add(Vector3.Lerp(originalMesh.normals[indexs[0]], originalMesh.normals[indexs[1]], finalT));
+            if (indexs[0] < originalMesh.tangents.Length && indexs[1] < originalMesh.tangents.Length)
+                newMeshDataVertex.Tangents.Add(Vector3.Lerp(originalMesh.tangents[indexs[0]], originalMesh.tangents[indexs[1]], finalT));
+            
+            if (indexs[0] < originalMesh.uv2.Length && indexs[1] < originalMesh.uv2.Length)
+                newMeshDataVertex.UV2.Add(Vector2.Lerp(originalMesh.uv2[indexs[0]], originalMesh.uv2[indexs[1]], finalT));
+            if (indexs[0] < originalMesh.uv3.Length && indexs[1] < originalMesh.uv3.Length)
+                newMeshDataVertex.UV3.Add(Vector2.Lerp(originalMesh.uv3[indexs[0]], originalMesh.uv3[indexs[1]], finalT));
+            if (indexs[0] < originalMesh.uv4.Length && indexs[1] < originalMesh.uv4.Length)
+                newMeshDataVertex.UV4.Add(Vector2.Lerp(originalMesh.uv4[indexs[0]], originalMesh.uv4[indexs[1]], finalT));
+            
+            if (indexs[0] < originalMesh.colors.Length && indexs[1] < originalMesh.colors.Length)
+                newMeshDataVertex.Colors.Add(Color.Lerp(originalMesh.colors[indexs[0]], originalMesh.colors[indexs[1]], finalT));
+            if (indexs[0] < originalMesh.colors32.Length && indexs[1] < originalMesh.colors32.Length)
+                newMeshDataVertex.Colors32.Add(Color.Lerp(originalMesh.colors32[indexs[0]], originalMesh.colors32[indexs[1]], finalT));
+
+            // TODO: BoneWightはLerpに非対応なので、独自実装する必要あり
+            // if (indexs[0] < originalMesh.boneWeights.Length && indexs[1] < originalMesh.boneWeights.Length)
+            //     newMeshDataVertex.BoneWeights.Add(BoneWeight.Lerp(originalMesh.boneWeights[indexs[0]], originalMesh.boneWeights[indexs[1]], finalT));
             return newMeshDataVertex;
         }
 

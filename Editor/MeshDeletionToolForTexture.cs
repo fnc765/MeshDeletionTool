@@ -147,10 +147,10 @@ namespace MeshDeletionTool
             {
                 if (removeVerticesIndexs.Contains(index))
                     continue;
-
-                Vector3 vertex = originalMesh.vertices[index];
-                newMeshData.Vertices.Add(vertex);
-                newMeshData.UV.Add(originalMesh.uv[index]);
+                newMeshData.AddElementFromMesh(originalMesh, index);
+                // Vector3 vertex = originalMesh.vertices[index];
+                // newMeshData.Vertices.Add(vertex);
+                // newMeshData.UV.Add(originalMesh.uv[index]);
             }
             
             // 重複している頂点(シーム)のインデックスリストを作成
@@ -229,7 +229,16 @@ namespace MeshDeletionTool
                     }
                 }
                 newMesh.SetVertices(newMeshData.Vertices.ToList());
+                newMesh.SetNormals(newMeshData.Normals.ToList());
+                newMesh.SetTangents(newMeshData.Tangents.ToList());
                 newMesh.SetUVs(0, newMeshData.UV.ToList());
+                newMesh.SetUVs(1, newMeshData.UV2.ToList());
+                newMesh.SetUVs(2, newMeshData.UV3.ToList());
+                newMesh.SetUVs(3, newMeshData.UV4.ToList());
+                newMesh.SetColors(newMeshData.Colors.ToList());
+                newMesh.SetColors(newMeshData.Colors32.ToList());
+                // if (newMeshData.BoneWeights.Count > 0)
+                //     newMesh.boneWeights = newMeshData.BoneWeights.ToArray();
                 newMesh.SetTriangles(newSubMeshTriangles, addSubMeshIndex++);
             }
 
@@ -434,8 +443,9 @@ namespace MeshDeletionTool
                         !seamVertexIndex.Contains(triangleIndexs[2].index)) {
                         addVertexIndexMap[vertex] = newMeshData.Vertices.Count;  //追加頂点の重複防止Mapに追加
                     }
-                    newMeshData.Vertices.Add(vertex);
-                    newMeshData.UV.Add(uv);
+                    // newMeshData.Vertices.Add(vertex);
+                    // newMeshData.UV.Add(uv);
+                    newMeshData.Add(addMeshData.GetElementAt(j));
                     polygonToGlobalIndexMap.Add(newMeshData.Vertices.Count - 1);
                 } else {
                     polygonToGlobalIndexMap.Add(addVertexIndexMap[vertex]);

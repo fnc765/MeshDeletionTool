@@ -346,6 +346,112 @@ namespace MeshDeletionTool
                     this.Triangles.AddRange(meshData.Triangles);
                 }
             }
+
+            public MeshData GetElementAt(int index)
+            {
+                var result = new MeshData();
+
+                if (index < Vertices.Count)
+                {
+                    result.Vertices.Add(Vertices[index]);
+                }
+                if (index < Normals.Count)
+                {
+                    result.Normals.Add(Normals[index]);
+                }
+                if (index < Tangents.Count)
+                {
+                    result.Tangents.Add(Tangents[index]);
+                }
+                if (index < UV.Count)
+                {
+                    result.UV.Add(UV[index]);
+                }
+                if (index < UV2.Count)
+                {
+                    result.UV2.Add(UV2[index]);
+                }
+                if (index < UV3.Count)
+                {
+                    result.UV3.Add(UV3[index]);
+                }
+                if (index < UV4.Count)
+                {
+                    result.UV4.Add(UV4[index]);
+                }
+                if (index < Colors.Count)
+                {
+                    result.Colors.Add(Colors[index]);
+                }
+                if (index < Colors32.Count)
+                {
+                    result.Colors32.Add(Colors32[index]);
+                }
+                if (index < BoneWeights.Count)
+                {
+                    result.BoneWeights.Add(BoneWeights[index]);
+                }
+                if (index < Triangles.Count)
+                {
+                    result.Triangles.Add(Triangles[index]);
+                }
+
+                return result;
+            }
+
+            public void AddElementFromMesh(Mesh mesh, int index)
+            {
+                if (mesh == null || index < 0)
+                {
+                    return;
+                }
+
+                if (index < mesh.vertexCount)
+                {
+                    Vertices.Add(mesh.vertices[index]);
+                    if (mesh.normals.Length > index)
+                    {
+                        Normals.Add(mesh.normals[index]);
+                    }
+                    if (mesh.tangents.Length > index)
+                    {
+                        Tangents.Add(mesh.tangents[index]);
+                    }
+                    if (mesh.uv.Length > index)
+                    {
+                        UV.Add(mesh.uv[index]);
+                    }
+                    if (mesh.uv2.Length > index)
+                    {
+                        UV2.Add(mesh.uv2[index]);
+                    }
+                    if (mesh.uv3.Length > index)
+                    {
+                        UV3.Add(mesh.uv3[index]);
+                    }
+                    if (mesh.uv4.Length > index)
+                    {
+                        UV4.Add(mesh.uv4[index]);
+                    }
+                    if (mesh.colors.Length > index)
+                    {
+                        Colors.Add(mesh.colors[index]);
+                    }
+                    if (mesh.colors32.Length > index)
+                    {
+                        Colors32.Add(mesh.colors32[index]);
+                    }
+                    if (mesh.boneWeights.Length > index)
+                    {
+                        BoneWeights.Add(mesh.boneWeights[index]);
+                    }
+                }
+
+                if (mesh.triangles.Length > index)
+                {
+                    Triangles.Add(mesh.triangles[index]);
+                }
+            }
         }
     }
 }

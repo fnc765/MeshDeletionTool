@@ -419,9 +419,11 @@ namespace MeshDeletionTool
             if (indexs[0] < originalMesh.colors32.Length && indexs[1] < originalMesh.colors32.Length)
                 newMeshDataVertex.Colors32.Add(Color.Lerp(originalMesh.colors32[indexs[0]], originalMesh.colors32[indexs[1]], finalT));
 
-            // TODO: BoneWightはLerpに非対応なので、独自実装する必要あり
-            // if (indexs[0] < originalMesh.boneWeights.Length && indexs[1] < originalMesh.boneWeights.Length)
-            //     newMeshDataVertex.BoneWeights.Add(BoneWeight.Lerp(originalMesh.boneWeights[indexs[0]], originalMesh.boneWeights[indexs[1]], finalT));
+            if (indexs[0] < originalMesh.boneWeights.Length && indexs[1] < originalMesh.boneWeights.Length)
+            {
+                BoneWeight BoneWeightLerp= BoneWeightUtils.LerpBoneWeight(originalMesh.boneWeights[indexs[0]], originalMesh.boneWeights[indexs[1]], finalT);
+                newMeshDataVertex.BoneWeights.Add(BoneWeightLerp);
+            }
             return newMeshDataVertex;
         }
 

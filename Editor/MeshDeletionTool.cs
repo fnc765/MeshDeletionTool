@@ -188,23 +188,33 @@ namespace MeshDeletionTool
 
         protected void RemoveBlendShapes(Mesh originalMesh, List<int> removeVerticesIndexs, Mesh newMesh)
         {
+            // 1つの頂点に対して：ブレンドシェイプの数×ブレンドシェイプのフレーム分の頂点、法線、接線情報が必要
+            // 元のメッシュの全ブレンドシェイプに対して処理を行う
             for (int i = 0; i < originalMesh.blendShapeCount; i++)
             {
+                // 現在のブレンドシェイプの名前を取得
                 string blendShapeName = originalMesh.GetBlendShapeName(i);
+                // 現在のブレンドシェイプのフレーム数を取得
                 int frameCount = originalMesh.GetBlendShapeFrameCount(i);
 
+                // 各フレームに対して処理を行う
                 for (int j = 0; j < frameCount; j++)
                 {
+                    // フレームのウェイトを取得
                     float frameWeight = originalMesh.GetBlendShapeFrameWeight(i, j);
+                    // フレームの頂点、法線、接線を格納する配列を作成
                     Vector3[] frameVertices = new Vector3[originalMesh.vertexCount];
                     Vector3[] frameNormals = new Vector3[originalMesh.vertexCount];
                     Vector3[] frameTangents = new Vector3[originalMesh.vertexCount];
+                    // フレームの頂点、法線、接線を取得
                     originalMesh.GetBlendShapeFrameVertices(i, j, frameVertices, frameNormals, frameTangents);
 
+                    // 配列をリストに変換
                     List<Vector3> frameVerticesList = new List<Vector3>(frameVertices);
                     List<Vector3> frameNormalsList = new List<Vector3>(frameNormals);
                     List<Vector3> frameTangentsList = new List<Vector3>(frameTangents);
 
+                    // 指定されたインデックスの頂点、法線、接線をリストから削除
                     foreach (int index in removeVerticesIndexs)
                     {
                         frameVerticesList.RemoveAt(index);
@@ -212,6 +222,7 @@ namespace MeshDeletionTool
                         frameTangentsList.RemoveAt(index);
                     }
 
+                    // 新しいメッシュにブレンドシェイプのフレームを追加
                     newMesh.AddBlendShapeFrame(blendShapeName, frameWeight, frameVerticesList.ToArray(), frameNormalsList.ToArray(), frameTangentsList.ToArray());
                 }
             }

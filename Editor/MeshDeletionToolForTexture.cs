@@ -237,8 +237,7 @@ namespace MeshDeletionTool
                 newMesh.SetUVs(3, newMeshData.UV4.ToList());
                 newMesh.SetColors(newMeshData.Colors.ToList());
                 newMesh.SetColors(newMeshData.Colors32.ToList());
-                // if (newMeshData.BoneWeights.Count > 0)
-                //     newMesh.boneWeights = newMeshData.BoneWeights.ToArray();
+                newMesh.boneWeights = newMeshData.BoneWeights.ToArray();
                 newMesh.SetTriangles(newSubMeshTriangles, addSubMeshIndex++);
             }
 

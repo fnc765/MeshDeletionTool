@@ -340,7 +340,8 @@ namespace MeshDeletionTool
             if (IsBoundaryEdge(texture, uv1, uv2))
             {
                 // 境界エッジの場合、境界点のUV座標と頂点座標を計算
-                newMeshDataVertex = FindAlphaBoundary(originalMesh, texture, indexs);
+                float weight = FindAlphaBoundary(originalMesh, texture, indexs);
+                newMeshDataVertex = VertexCompletion(originalMesh, indexs, weight);
             }
 
             return newMeshDataVertex;
@@ -361,8 +362,8 @@ namespace MeshDeletionTool
             return (color1.a == 0 && color2.a != 0) || (color1.a != 0 && color2.a == 0);
         }
 
-        // テクスチャのアルファ値に基づき、エッジ上の境界点のUV座標と頂点座標を探す関数
-        private MeshData FindAlphaBoundary(Mesh originalMesh, Texture2D texture, int[] indexs)
+        // テクスチャのアルファ値に基づき、エッジ上の境界点のUV座標の補完用重みを求める
+        private float FindAlphaBoundary(Mesh originalMesh, Texture2D texture, int[] indexs)
         {
             Vector2 uv1 = originalMesh.uv[indexs[0]];
             Vector2 uv2 = originalMesh.uv[indexs[1]];
@@ -395,32 +396,38 @@ namespace MeshDeletionTool
             }
 
             // 最終的な境界点のUV座標と頂点座標を計算して返す
-            float finalT = (tMin + tMax) / 2.0f;
+            float weight = (tMin + tMax) / 2.0f;
+            return weight;
+        }
+
+        // ２つの頂点インデックスと重みから線形補完したMeshDataを返す
+        private MeshData VertexCompletion(Mesh originalMesh, int[] indexs, float weight)
+        {
             MeshData newMeshDataVertex = new MeshData();
 
-            newMeshDataVertex.Vertices.Add(Vector3.Lerp(originalMesh.vertices[indexs[0]], originalMesh.vertices[indexs[1]], finalT));
-            newMeshDataVertex.UV.Add(Vector2.Lerp(originalMesh.uv[indexs[0]], originalMesh.uv[indexs[1]], finalT));
+            newMeshDataVertex.Vertices.Add(Vector3.Lerp(originalMesh.vertices[indexs[0]], originalMesh.vertices[indexs[1]], weight));
+            newMeshDataVertex.UV.Add(Vector2.Lerp(originalMesh.uv[indexs[0]], originalMesh.uv[indexs[1]], weight));
 
             if (indexs[0] < originalMesh.normals.Length && indexs[1] < originalMesh.normals.Length)
-                newMeshDataVertex.Normals.Add(Vector3.Lerp(originalMesh.normals[indexs[0]], originalMesh.normals[indexs[1]], finalT));
+                newMeshDataVertex.Normals.Add(Vector3.Lerp(originalMesh.normals[indexs[0]], originalMesh.normals[indexs[1]], weight));
             if (indexs[0] < originalMesh.tangents.Length && indexs[1] < originalMesh.tangents.Length)
-                newMeshDataVertex.Tangents.Add(Vector3.Lerp(originalMesh.tangents[indexs[0]], originalMesh.tangents[indexs[1]], finalT));
+                newMeshDataVertex.Tangents.Add(Vector3.Lerp(originalMesh.tangents[indexs[0]], originalMesh.tangents[indexs[1]], weight));
             
             if (indexs[0] < originalMesh.uv2.Length && indexs[1] < originalMesh.uv2.Length)
-                newMeshDataVertex.UV2.Add(Vector2.Lerp(originalMesh.uv2[indexs[0]], originalMesh.uv2[indexs[1]], finalT));
+                newMeshDataVertex.UV2.Add(Vector2.Lerp(originalMesh.uv2[indexs[0]], originalMesh.uv2[indexs[1]], weight));
             if (indexs[0] < originalMesh.uv3.Length && indexs[1] < originalMesh.uv3.Length)
-                newMeshDataVertex.UV3.Add(Vector2.Lerp(originalMesh.uv3[indexs[0]], originalMesh.uv3[indexs[1]], finalT));
+                newMeshDataVertex.UV3.Add(Vector2.Lerp(originalMesh.uv3[indexs[0]], originalMesh.uv3[indexs[1]], weight));
             if (indexs[0] < originalMesh.uv4.Length && indexs[1] < originalMesh.uv4.Length)
-                newMeshDataVertex.UV4.Add(Vector2.Lerp(originalMesh.uv4[indexs[0]], originalMesh.uv4[indexs[1]], finalT));
+                newMeshDataVertex.UV4.Add(Vector2.Lerp(originalMesh.uv4[indexs[0]], originalMesh.uv4[indexs[1]], weight));
             
             if (indexs[0] < originalMesh.colors.Length && indexs[1] < originalMesh.colors.Length)
-                newMeshDataVertex.Colors.Add(Color.Lerp(originalMesh.colors[indexs[0]], originalMesh.colors[indexs[1]], finalT));
+                newMeshDataVertex.Colors.Add(Color.Lerp(originalMesh.colors[indexs[0]], originalMesh.colors[indexs[1]], weight));
             if (indexs[0] < originalMesh.colors32.Length && indexs[1] < originalMesh.colors32.Length)
-                newMeshDataVertex.Colors32.Add(Color.Lerp(originalMesh.colors32[indexs[0]], originalMesh.colors32[indexs[1]], finalT));
+                newMeshDataVertex.Colors32.Add(Color.Lerp(originalMesh.colors32[indexs[0]], originalMesh.colors32[indexs[1]], weight));
 
             if (indexs[0] < originalMesh.boneWeights.Length && indexs[1] < originalMesh.boneWeights.Length)
             {
-                BoneWeight BoneWeightLerp= BoneWeightUtils.LerpBoneWeight(originalMesh.boneWeights[indexs[0]], originalMesh.boneWeights[indexs[1]], finalT);
+                BoneWeight BoneWeightLerp= BoneWeightUtils.LerpBoneWeight(originalMesh.boneWeights[indexs[0]], originalMesh.boneWeights[indexs[1]], weight);
                 newMeshDataVertex.BoneWeights.Add(BoneWeightLerp);
             }
             return newMeshDataVertex;

@@ -11,6 +11,9 @@ namespace MeshDeletionTool
         // 対象オブジェクトのRendererを保持するための内部フィールド
         internal Renderer targetRenderer;
 
+        // アルファ値がこの値より小さいメッシュは削除する
+        private float alphaThreshold = 0.5F;
+
         // メニューアイテムからツールを初期化してウィンドウを表示するメソッド
         [MenuItem("Tools/MeshDeletionToolForTexture")]
         private static void Init()
@@ -29,6 +32,10 @@ namespace MeshDeletionTool
 
             // 対象オブジェクトを選択するためのフィールド
             targetRenderer = EditorGUILayout.ObjectField("対象オブジェクト", targetRenderer, typeof(Renderer), true) as Renderer;
+
+            // アルファ閾値を指定するスライダーを追加
+            GUILayout.Label("アルファ閾値を設定", EditorStyles.boldLabel);
+            alphaThreshold = EditorGUILayout.Slider("アルファ閾値", alphaThreshold, 0f, 1f);
 
             // ボタンをクリックしたらメッシュ削除処理を実行
             if (GUILayout.Button("テクスチャ透明部分のメッシュを削除"))
@@ -110,8 +117,8 @@ namespace MeshDeletionTool
                             Vector2 pixelUV = new Vector2(uv.x * (texture.width - 1), uv.y * (texture.height - 1));
                             Color color = texture.GetPixel((int)pixelUV.x, (int)pixelUV.y);
 
-                            // ピクセルのアルファ値が0なら頂点を削除対象とする
-                            if (color.a == 0)
+                            // ピクセルのアルファ値がalphaThresholdより小さいなら頂点を削除対象とする
+                            if (color.a < alphaThreshold)
                             {
                                 vertexShouldBeRemoved = true;
                                 break;
@@ -370,7 +377,7 @@ namespace MeshDeletionTool
             Color color2 = texture.GetPixel((int)pixelUV2.x, (int)pixelUV2.y);
 
             // 片方のピクセルが透明で、もう片方が透明でない場合は境界エッジとする
-            return (color1.a == 0 && color2.a != 0) || (color1.a != 0 && color2.a == 0);
+            return (color1.a < alphaThreshold && color2.a > alphaThreshold) || (color1.a > alphaThreshold && color2.a < alphaThreshold);
         }
 
         // テクスチャのアルファ値に基づき、エッジ上の境界点のUV座標の補完用重みを求める
@@ -395,7 +402,7 @@ namespace MeshDeletionTool
                 Color midColor = texture.GetPixel((int)midPixelUV.x, (int)midPixelUV.y);
 
                 // 境界条件に応じて探索範囲を狭める
-                if ((color1.a == 0 && midColor.a != 0) || (color1.a != 0 && midColor.a == 0))
+                if ((color1.a < alphaThreshold && midColor.a > alphaThreshold) || (color1.a > alphaThreshold && midColor.a < alphaThreshold))
                 {
                     tMax = t; // 境界があると考えられる範囲を左側に絞り込む
                 }

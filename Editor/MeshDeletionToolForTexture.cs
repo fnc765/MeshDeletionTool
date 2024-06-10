@@ -151,9 +151,6 @@ namespace MeshDeletionTool
                 if (removeVerticesIndexs.Contains(index))
                     continue;
                 newMeshData.AddElementFromMesh(originalMesh, index);
-                // Vector3 vertex = originalMesh.vertices[index];
-                // newMeshData.Vertices.Add(vertex);
-                // newMeshData.UV.Add(originalMesh.uv[index]);
             }
             
             // 重複している頂点(シーム)のインデックスリストを作成
@@ -211,11 +208,12 @@ namespace MeshDeletionTool
                         (List<Vector3> originVertices, List<int> polygonToGlobalIndexMap) =
                             addNonDeletableVertexToPolygon(originalMesh, oldToNewIndexMap, triangleIndexs);         
 
-                        // 辺への新規頂点追加
+                        // 辺上の新規頂点座標と、シェイプキー用補完重みを計算
                         (MeshData addMeshData, List<(int, int, float)> localVertexInterpolation) =
                             addNewVertexToEdge(originalMesh, texture, triangleIndexs);
 
                         // 追加頂点の中で重複が無いように全体メッシュへ頂点を追加する（既存頂点はシームなどで重複がある）
+                        // シェイプキー用補完重みも同様に重複を排除する
                         addUniqueMeshData(addMeshData, triangleIndexs, seamVertexIndex,
                                           newMeshData, polygonToGlobalIndexMap, addVertexIndexMap,
                                           localVertexInterpolation, vertexInterpolation);
@@ -463,8 +461,6 @@ namespace MeshDeletionTool
                         !seamVertexIndex.Contains(triangleIndexs[2].index)) {
                         addVertexIndexMap[vertex] = newMeshData.Vertices.Count;  //追加頂点の重複防止Mapに追加
                     }
-                    // newMeshData.Vertices.Add(vertex);
-                    // newMeshData.UV.Add(uv);
                     newMeshData.Add(addMeshData.GetElementAt(j));
                     polygonToGlobalIndexMap.Add(newMeshData.Vertices.Count - 1);
                     vertexInterpolation.Add(newMeshData.Vertices.Count - 1, localVertexInterpolation[j]);

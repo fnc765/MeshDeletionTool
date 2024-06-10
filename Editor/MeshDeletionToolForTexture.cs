@@ -140,6 +140,9 @@ namespace MeshDeletionTool
             // 新規追加頂点の重複を避けるためにマッピング
             Dictionary<Vector3, int> addVertexIndexMap = new Dictionary<Vector3, int>();
 
+            // 新規追加頂点を補完するための２点頂点インデックスと重みを、新規頂点インデックスをキーとして保持
+            Dictionary<int, (int, int, float)> vertexInterpolation = new Dictionary<int, (int, int, float)>();
+
             Mesh newMesh = new Mesh();
 
             // 先に不要頂点を削除する
@@ -209,11 +212,13 @@ namespace MeshDeletionTool
                             addNonDeletableVertexToPolygon(originalMesh, oldToNewIndexMap, triangleIndexs);         
 
                         // 辺への新規頂点追加
-                        MeshData addMeshData = addNewVertexToEdge(originalMesh, texture, triangleIndexs);
+                        (MeshData addMeshData, List<(int, int, float)> localVertexInterpolation) =
+                            addNewVertexToEdge(originalMesh, texture, triangleIndexs);
 
                         // 追加頂点の中で重複が無いように全体メッシュへ頂点を追加する（既存頂点はシームなどで重複がある）
                         addUniqueMeshData(addMeshData, triangleIndexs, seamVertexIndex,
-                                          newMeshData, polygonToGlobalIndexMap, addVertexIndexMap);
+                                          newMeshData, polygonToGlobalIndexMap, addVertexIndexMap,
+                                          localVertexInterpolation, vertexInterpolation);
 
                         // 処理対象の多角形の外形頂点としてまとめる
                         List<Vector3> polygonVertices = new List<Vector3>();
@@ -303,10 +308,12 @@ namespace MeshDeletionTool
         }
 
         // 辺への新規頂点追加
-        private MeshData addNewVertexToEdge(Mesh originalMesh, Texture2D texture,
-                                            List<(int index, bool isRemoved)> triangleIndexs)
+        private (MeshData, List<(int, int, float)>) addNewVertexToEdge(Mesh originalMesh, Texture2D texture,
+                                                                       List<(int index, bool isRemoved)> triangleIndexs)
         {
             MeshData addMeshData = new MeshData();
+            List<(int, int, float)> localVertexInterpolation = new List<(int, int, float)>();
+
             if (texture != null)
             {
                 List<int[]> sideIndexs = new List<int[]>(){
@@ -317,34 +324,37 @@ namespace MeshDeletionTool
                 // 三角形の各辺に対して、テクスチャ境界値の座標&UV座標の計算
                 for (int triangleIndex = 0; triangleIndex < 3; triangleIndex++)
                 {
-                    MeshData newMeshDataVertex = 
+                    (MeshData newMeshDataVertex, float wight) = 
                         AddEdgeIntersectionPoints(originalMesh, texture, sideIndexs[triangleIndex]);
                     if (newMeshDataVertex.Vertices.Count > 0) // テクスチャ境界値があるなら
                     {
-                        addMeshData.Add(newMeshDataVertex); //多角形頂点に追加
+                        // ２つの頂点と重みを保存（対象三角ポリゴンでのローカルな座標インデックスで管理）
+                        localVertexInterpolation.Add((sideIndexs[triangleIndex][0], sideIndexs[triangleIndex][1], wight));
+                        addMeshData.Add(newMeshDataVertex); //多角形頂点に追加   
                     }
                 }
             }
-            return addMeshData;
+            return (addMeshData, localVertexInterpolation);
         }
 
         // originalMeshのエッジとテクスチャの境界点を検出し、エッジ交点のUV座標と新しい頂点座標を返す関数
-        private MeshData AddEdgeIntersectionPoints(Mesh originalMesh, Texture2D texture, int[] indexs)
+        private (MeshData, float) AddEdgeIntersectionPoints(Mesh originalMesh, Texture2D texture, int[] indexs)
         {
             // エッジの両端点のUV座標を取得
             Vector2 uv1 = originalMesh.uv[indexs[0]];
             Vector2 uv2 = originalMesh.uv[indexs[1]];
             MeshData newMeshDataVertex = new MeshData();
+            float weight = 0;
 
             // エッジが境界エッジかどうかを判定
             if (IsBoundaryEdge(texture, uv1, uv2))
             {
                 // 境界エッジの場合、境界点のUV座標と頂点座標を計算
-                float weight = FindAlphaBoundary(originalMesh, texture, indexs);
+                weight = FindAlphaBoundary(originalMesh, texture, indexs);
                 newMeshDataVertex = VertexCompletion(originalMesh, indexs, weight);
             }
 
-            return newMeshDataVertex;
+            return (newMeshDataVertex, weight);
         }
 
         // UV座標が示すテクスチャのピクセルが境界エッジかどうかを判定する関数
@@ -437,7 +447,9 @@ namespace MeshDeletionTool
         private void addUniqueMeshData(MeshData addMeshData, List<(int index, bool isRemoved)> triangleIndexs,
                                        HashSet<int> seamVertexIndex,
                                        MeshData newMeshData, List<int> polygonToGlobalIndexMap, 
-                                       Dictionary<Vector3, int> addVertexIndexMap)
+                                       Dictionary<Vector3, int> addVertexIndexMap,
+                                       List<(int, int, float)> localVertexInterpolation,
+                                       Dictionary<int, (int, int, float)> vertexInterpolation)
         {
             for (int j = 0; j < addMeshData.Vertices.Count; j++)
             {
@@ -455,6 +467,7 @@ namespace MeshDeletionTool
                     // newMeshData.UV.Add(uv);
                     newMeshData.Add(addMeshData.GetElementAt(j));
                     polygonToGlobalIndexMap.Add(newMeshData.Vertices.Count - 1);
+                    vertexInterpolation.Add(newMeshData.Vertices.Count - 1, localVertexInterpolation[j]);
                 } else {
                     polygonToGlobalIndexMap.Add(addVertexIndexMap[vertex]);
                 }

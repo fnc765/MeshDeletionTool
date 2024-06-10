@@ -245,6 +245,9 @@ namespace MeshDeletionTool
             }
 
             newMesh.subMeshCount = addSubMeshIndex;
+            newMesh.bindposes = originalMesh.bindposes;
+
+            CompletionBlendShapes(originalMesh, removeVerticesIndexs, newMesh, vertexInterpolation);
 
             return newMesh;
         }
@@ -494,6 +497,62 @@ namespace MeshDeletionTool
                 polygonTriangles.Add(polygonToGlobalIndexMap[polygonIndex]);
             }
             return polygonTriangles;
+        }
+
+        protected void CompletionBlendShapes(Mesh originalMesh, List<int> removeVerticesIndexs, Mesh newMesh, Dictionary<int, (int, int, float)> blendShapeInterpolation)
+        {
+            // 1つの頂点に対して：ブレンドシェイプの数×ブレンドシェイプのフレーム分の頂点、法線、接線情報が必要
+            // 元のメッシュの全ブレンドシェイプに対して処理を行う
+            for (int i = 0; i < originalMesh.blendShapeCount; i++)
+            {
+                // 現在のブレンドシェイプの名前を取得
+                string blendShapeName = originalMesh.GetBlendShapeName(i);
+                // 現在のブレンドシェイプのフレーム数を取得
+                int frameCount = originalMesh.GetBlendShapeFrameCount(i);
+
+                // 各フレームに対して処理を行う
+                for (int j = 0; j < frameCount; j++)
+                {
+                    // フレームのウェイトを取得
+                    float frameWeight = originalMesh.GetBlendShapeFrameWeight(i, j);
+                    // フレームの頂点、法線、接線を格納する配列を作成
+                    Vector3[] frameVertices = new Vector3[originalMesh.vertexCount];
+                    Vector3[] frameNormals = new Vector3[originalMesh.vertexCount];
+                    Vector3[] frameTangents = new Vector3[originalMesh.vertexCount];
+                    // フレームの頂点、法線、接線を取得
+                    originalMesh.GetBlendShapeFrameVertices(i, j, frameVertices, frameNormals, frameTangents);
+
+                    // 配列をリストに変換
+                    List<Vector3> frameVerticesList = new List<Vector3>(frameVertices);
+                    List<Vector3> frameNormalsList = new List<Vector3>(frameNormals);
+                    List<Vector3> frameTangentsList = new List<Vector3>(frameTangents);
+
+                    // 指定されたインデックスの頂点、法線、接線をリストから削除
+                    foreach (int index in removeVerticesIndexs)
+                    {
+                        frameVerticesList.RemoveAt(index);
+                        frameNormalsList.RemoveAt(index);
+                        frameTangentsList.RemoveAt(index);
+                    }
+
+                    // 補完処理の追加
+                    foreach (var kvp in blendShapeInterpolation)
+                    {
+                        int newIndex = kvp.Key;
+                        (int indexA, int indexB, float weight) = kvp.Value;
+
+                        // 頂点の補完
+                        frameVerticesList.Add(Vector3.Lerp(frameVertices[indexA], frameVertices[indexB], weight));
+                        // 法線の補完
+                        frameNormalsList.Add(Vector3.Lerp(frameNormals[indexA], frameNormals[indexB], weight).normalized);
+                        // 接線の補完
+                        frameTangentsList.Add(Vector3.Lerp(frameTangents[indexA], frameTangents[indexB], weight).normalized);
+                    }
+
+                    // 新しいメッシュにブレンドシェイプのフレームを追加
+                    newMesh.AddBlendShapeFrame(blendShapeName, frameWeight, frameVerticesList.ToArray(), frameNormalsList.ToArray(), frameTangentsList.ToArray());
+                }
+            }
         }
     }
 }

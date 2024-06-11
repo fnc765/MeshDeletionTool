@@ -14,6 +14,9 @@ namespace MeshDeletionTool
         // アルファ値がこの値より小さいメッシュは削除する
         private float alphaThreshold = 0.5F;
 
+        // サブメッシュの表示フラグ
+        private Dictionary<int, bool> subMeshVisibility = new Dictionary<int, bool>();
+
         // メニューアイテムからツールを初期化してウィンドウを表示するメソッド
         [MenuItem("Tools/MeshDeletionToolForTexture")]
         private static void Init()
@@ -34,14 +37,77 @@ namespace MeshDeletionTool
             targetRenderer = EditorGUILayout.ObjectField("対象オブジェクト", targetRenderer, typeof(Renderer), true) as Renderer;
 
             // アルファ閾値を指定するスライダーを追加
-            GUILayout.Label("アルファ閾値を設定", EditorStyles.boldLabel);
+            GUILayout.Label("\nアルファ閾値を設定", EditorStyles.boldLabel);
             alphaThreshold = EditorGUILayout.Slider("アルファ閾値", alphaThreshold, 0f, 1f);
+
+            if (targetRenderer != null)
+            {
+                Mesh originalMesh = GetOriginalMesh(targetRenderer);
+                Material[] originalMaterials = GetOriginalMaterials(targetRenderer);
+
+                if (originalMesh != null)
+                {
+                    GUILayout.Label("\nサブメッシュ一覧から処理対象を選択（チェックで処理対象となる）", EditorStyles.boldLabel);
+                    for (int i = 0; i < originalMesh.subMeshCount; i++)
+                    {
+                        if (!subMeshVisibility.ContainsKey(i))
+                        {
+                            subMeshVisibility[i] = true; // デフォルトで全てのサブメッシュを表示
+                        }
+                        
+                        GUILayout.BeginHorizontal();
+                        EditorGUILayout.LabelField("サブメッシュ " + i, GUILayout.Width(80));
+                        subMeshVisibility[i] = EditorGUILayout.Toggle(subMeshVisibility[i], GUILayout.Width(20));
+                        // テクスチャの名前を表示
+                        string textureName = GetTextureNameForSubMesh(originalMaterials, i);
+                        if (GUILayout.Button("テクスチャ名:" + textureName, new GUIStyle(GUI.skin.button) { alignment = TextAnchor.MiddleLeft }))
+                        {
+                            ShowTextureForSubMesh(originalMaterials, i);
+                        }
+                        
+                        // GUILayout.Label("テクスチャ名:" + textureName, GUILayout.Width(200));
+                        GUILayout.EndHorizontal();
+                    }
+                }
+                else
+                {
+                    GUILayout.Label("選択されたオブジェクトに有効なメッシュがありません。");
+                    Debug.LogWarning("選択されたオブジェクトに有効なメッシュがありません。");
+                }
+            }
 
             // ボタンをクリックしたらメッシュ削除処理を実行
             if (GUILayout.Button("テクスチャ透明部分のメッシュを削除"))
             {
                 DeleteMeshesFromTexture();
             }
+        }
+
+        // サブメッシュのテクスチャを表示するメソッド
+        private void ShowTextureForSubMesh(Material[] materials, int subMeshIndex)
+        {
+            if (materials.Length > subMeshIndex)
+            {
+                Material mat = materials[subMeshIndex];
+                if (mat != null && mat.mainTexture != null)
+                {
+                    EditorGUIUtility.PingObject(mat.mainTexture);
+                }
+            }
+        }
+
+        // サブメッシュのテクスチャ名を取得するメソッド
+        private string GetTextureNameForSubMesh(Material[] materials, int subMeshIndex)
+        {
+            if (materials.Length > subMeshIndex)
+            {
+                Material mat = materials[subMeshIndex];
+                if (mat != null && mat.mainTexture != null)
+                {
+                    return mat.mainTexture.name;
+                }
+            }
+            return "テクスチャなし";
         }
 
         // テクスチャの透明部分に基づいてメッシュを削除するメソッド

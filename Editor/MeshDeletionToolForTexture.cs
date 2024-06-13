@@ -55,7 +55,7 @@ namespace MeshDeletionTool
                     {
                         if (!subMeshVisibility.ContainsKey(i))
                         {
-                            subMeshVisibility[i] = true; // デフォルトで全てのサブメッシュを表示
+                            subMeshVisibility[i] = false; // デフォルトは処理対象外
                         }
                         
                         GUILayout.BeginHorizontal();
@@ -221,7 +221,25 @@ namespace MeshDeletionTool
 
             Mesh newMesh = new Mesh();
 
-            // 先に不要頂点を削除する
+
+            // 処理されないサブメッシュに含まれる頂点インデックスを収集
+            HashSet<int> nonRemoveVerticesIndexs = new HashSet<int>();
+            for (int subMeshIndex = 0; subMeshIndex < originalMesh.subMeshCount; subMeshIndex++)
+            {
+                if (subMeshVisibility[subMeshIndex] == false)
+                {
+                    int[] triangles = originalMesh.GetTriangles(subMeshIndex);
+                    foreach (int index in triangles)
+                    {
+                        nonRemoveVerticesIndexs.Add(index);
+                    }
+                }
+            }
+
+            // removeVerticesIndexsからnonRemoveVerticesIndexsに含まれるインデックスを削除
+            removeVerticesIndexs.RemoveAll(index => nonRemoveVerticesIndexs.Contains(index));
+
+            // 不要頂点を削除する
             for (int index = 0; index < originalMesh.vertexCount; index++)
             {
                 if (removeVerticesIndexs.Contains(index))
@@ -249,62 +267,75 @@ namespace MeshDeletionTool
                 int[] triangles = originalMesh.GetTriangles(subMeshIndex);
                 List<int> newSubMeshTriangles = new List<int>();
 
-                // 各三角形を確認し、必要に応じて新しい頂点を追加
-                for (int i = 0; i < triangles.Length; i += 3)
+                // 現在のサブメッシュが処理対象なら
+                if (subMeshVisibility[subMeshIndex] == true)
                 {
-                    // 三角ポリゴンを構成する頂点インデックスと削除情報を含んだタプルを作成
-                    List<(int index, bool isRemoved)> triangleIndexs = new List<(int index, bool isRemoved)>
+                    // 各三角形を確認し、必要に応じて新しい頂点を追加
+                    for (int i = 0; i < triangles.Length; i += 3)
                     {
-                        (triangles[i], removeVerticesIndexs.Contains(triangles[i])),
-                        (triangles[i + 1], removeVerticesIndexs.Contains(triangles[i + 1])),
-                        (triangles[i + 2], removeVerticesIndexs.Contains(triangles[i + 2]))
-                    };
+                        // 三角ポリゴンを構成する頂点インデックスと削除情報を含んだタプルを作成
+                        List<(int index, bool isRemoved)> triangleIndexs = new List<(int index, bool isRemoved)>
+                        {
+                            (triangles[i], removeVerticesIndexs.Contains(triangles[i])),
+                            (triangles[i + 1], removeVerticesIndexs.Contains(triangles[i + 1])),
+                            (triangles[i + 2], removeVerticesIndexs.Contains(triangles[i + 2]))
+                        };
 
-                    // 全ての頂点が削除対象の場合、三角形を追加しない
-                    if (triangleIndexs[0].isRemoved &&
-                        triangleIndexs[1].isRemoved &&
-                        triangleIndexs[2].isRemoved)
-                    {
-                        continue;
+                        // 全ての頂点が削除対象の場合、三角形を追加しない
+                        if (triangleIndexs[0].isRemoved &&
+                            triangleIndexs[1].isRemoved &&
+                            triangleIndexs[2].isRemoved)
+                        {
+                            continue;
+                        }
+                        // いずれの頂点も削除対象でない場合、三角形をそのまま追加
+                        else if ( !triangleIndexs[0].isRemoved &&
+                                !triangleIndexs[1].isRemoved &&
+                                !triangleIndexs[2].isRemoved)
+                        {
+                            // 先に不要頂点を削除しているため頂点インデックスを変換する必要がある
+                            newSubMeshTriangles.Add(oldToNewIndexMap[triangleIndexs[0].index]);
+                            newSubMeshTriangles.Add(oldToNewIndexMap[triangleIndexs[1].index]);
+                            newSubMeshTriangles.Add(oldToNewIndexMap[triangleIndexs[2].index]);
+                        }
+                        // 一部の頂点が削除対象の場合
+                        else
+                        {
+                            // 削除対象でない頂点を多角形頂点に追加
+                            (List<Vector3> originVertices, List<int> polygonToGlobalIndexMap) =
+                                addNonDeletableVertexToPolygon(originalMesh, oldToNewIndexMap, triangleIndexs);         
+
+                            // 辺上の新規頂点座標と、シェイプキー用補完重みを計算
+                            (MeshData addMeshData, List<(int, int, float)> localVertexInterpolation) =
+                                addNewVertexToEdge(originalMesh, texture, triangleIndexs);
+
+                            // 追加頂点の中で重複が無いように全体メッシュへ頂点を追加する（既存頂点はシームなどで重複がある）
+                            // シェイプキー用補完重みも同様に重複を排除する
+                            addUniqueMeshData(addMeshData, triangleIndexs, seamVertexIndex,
+                                            newMeshData, polygonToGlobalIndexMap, addVertexIndexMap,
+                                            localVertexInterpolation, vertexInterpolation);
+
+                            // 処理対象の多角形の外形頂点としてまとめる
+                            List<Vector3> polygonVertices = new List<Vector3>();
+                            polygonVertices.AddRange(originVertices);
+                            polygonVertices.AddRange(addMeshData.Vertices);
+
+                            // 多角形頂点から三角ポリゴンに変換し頂点インデックス配列を返す
+                            int[] triangulatedIndices = createTriangleFromPolygon(originalMesh, triangleIndexs, polygonVertices);
+                            // 三角ポリゴンの頂点インデックス配列を全体頂点インデックスに変換する
+                            List<int> polygonTriangles = convertIndexToGlobal(triangulatedIndices, polygonToGlobalIndexMap);
+                            // サブメッシュの三角ポリゴン配列に追加
+                            newSubMeshTriangles.AddRange(polygonTriangles);
+                        }
                     }
-                    // いずれの頂点も削除対象でない場合、三角形をそのまま追加
-                    else if ( !triangleIndexs[0].isRemoved &&
-                              !triangleIndexs[1].isRemoved &&
-                              !triangleIndexs[2].isRemoved)
+                }
+                // 現在のサブメッシュが処理対象でないなら
+                else
+                {
+                    // 三角ポリゴンのインデックスを新しい頂点インデックスに更新する
+                    for (int i = 0; i < triangles.Length; i++)
                     {
-                        // 先に不要頂点を削除しているため頂点インデックスを変換する必要がある
-                        newSubMeshTriangles.Add(oldToNewIndexMap[triangleIndexs[0].index]);
-                        newSubMeshTriangles.Add(oldToNewIndexMap[triangleIndexs[1].index]);
-                        newSubMeshTriangles.Add(oldToNewIndexMap[triangleIndexs[2].index]);
-                    }
-                    // 一部の頂点が削除対象の場合
-                    else
-                    {
-                        // 削除対象でない頂点を多角形頂点に追加
-                        (List<Vector3> originVertices, List<int> polygonToGlobalIndexMap) =
-                            addNonDeletableVertexToPolygon(originalMesh, oldToNewIndexMap, triangleIndexs);         
-
-                        // 辺上の新規頂点座標と、シェイプキー用補完重みを計算
-                        (MeshData addMeshData, List<(int, int, float)> localVertexInterpolation) =
-                            addNewVertexToEdge(originalMesh, texture, triangleIndexs);
-
-                        // 追加頂点の中で重複が無いように全体メッシュへ頂点を追加する（既存頂点はシームなどで重複がある）
-                        // シェイプキー用補完重みも同様に重複を排除する
-                        addUniqueMeshData(addMeshData, triangleIndexs, seamVertexIndex,
-                                          newMeshData, polygonToGlobalIndexMap, addVertexIndexMap,
-                                          localVertexInterpolation, vertexInterpolation);
-
-                        // 処理対象の多角形の外形頂点としてまとめる
-                        List<Vector3> polygonVertices = new List<Vector3>();
-                        polygonVertices.AddRange(originVertices);
-                        polygonVertices.AddRange(addMeshData.Vertices);
-
-                        // 多角形頂点から三角ポリゴンに変換し頂点インデックス配列を返す
-                        int[] triangulatedIndices = createTriangleFromPolygon(originalMesh, triangleIndexs, polygonVertices);
-                        // 三角ポリゴンの頂点インデックス配列を全体頂点インデックスに変換する
-                        List<int> polygonTriangles = convertIndexToGlobal(triangulatedIndices, polygonToGlobalIndexMap);
-                        // サブメッシュの三角ポリゴン配列に追加
-                        newSubMeshTriangles.AddRange(polygonTriangles);
+                        newSubMeshTriangles.Add(oldToNewIndexMap[triangles[i]]);
                     }
                 }
                 newMesh.SetVertices(newMeshData.Vertices.ToList());

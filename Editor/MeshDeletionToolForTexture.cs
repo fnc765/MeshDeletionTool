@@ -31,14 +31,18 @@ namespace MeshDeletionTool
         private void OnGUI()
         {
             // ラベルを表示
-            GUILayout.Label("オブジェクトを選択", EditorStyles.boldLabel);
+            GUILayout.Label("①オブジェクトを選択", EditorStyles.boldLabel);
 
             // 対象オブジェクトを選択するためのフィールド
             targetRenderer = EditorGUILayout.ObjectField("対象オブジェクト", targetRenderer, typeof(Renderer), true) as Renderer;
 
             // アルファ閾値を指定するスライダーを追加
-            GUILayout.Label("\nアルファ閾値を設定", EditorStyles.boldLabel);
+            GUILayout.Label("\n②アルファ閾値を設定", EditorStyles.boldLabel);
             alphaThreshold = EditorGUILayout.Slider("アルファ閾値", alphaThreshold, 0f, 1f);
+
+            // サブメッシュを選択するリストを表示
+            GUILayout.Label("\n③サブメッシュ一覧から処理対象を選択", EditorStyles.boldLabel);
+            GUILayout.Label("(チェックで処理対象となる)", EditorStyles.boldLabel);
 
             if (targetRenderer != null)
             {
@@ -47,7 +51,6 @@ namespace MeshDeletionTool
 
                 if (originalMesh != null)
                 {
-                    GUILayout.Label("\nサブメッシュ一覧から処理対象を選択（チェックで処理対象となる）", EditorStyles.boldLabel);
                     for (int i = 0; i < originalMesh.subMeshCount; i++)
                     {
                         if (!subMeshVisibility.ContainsKey(i))
@@ -60,7 +63,7 @@ namespace MeshDeletionTool
                         subMeshVisibility[i] = EditorGUILayout.Toggle(subMeshVisibility[i], GUILayout.Width(20));
                         // テクスチャの名前を表示
                         string textureName = GetTextureNameForSubMesh(originalMaterials, i);
-                        if (GUILayout.Button("テクスチャ名:" + textureName, new GUIStyle(GUI.skin.button) { alignment = TextAnchor.MiddleLeft }))
+                        if (GUILayout.Button("テクスチャ参照:" + textureName, new GUIStyle(GUI.skin.button) { alignment = TextAnchor.MiddleLeft }))
                         {
                             ShowTextureForSubMesh(originalMaterials, i);
                         }
@@ -75,7 +78,7 @@ namespace MeshDeletionTool
                     Debug.LogWarning("選択されたオブジェクトに有効なメッシュがありません。");
                 }
             }
-
+            GUILayout.Label("\n④処理実行", EditorStyles.boldLabel);
             // ボタンをクリックしたらメッシュ削除処理を実行
             if (GUILayout.Button("テクスチャ透明部分のメッシュを削除"))
             {

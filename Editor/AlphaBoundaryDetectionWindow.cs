@@ -12,7 +12,6 @@ public class AlphaBoundaryDetectionWindow : EditorWindow
     // プライベート変数を宣言
     private Texture2D sourceTexture; // 元のテクスチャ
     private Texture2D alphaTexture; // アルファチャンネルのテクスチャ
-    private List<Vector2> edgePoints; // エッジの座標リスト
     private List<List<Vector2>> boundaries; // 境界のリスト
     private List<List<Vector2>> simplifiedBoundaries;
     private List<List<Vector2>> labelEdgePoints = new List<List<Vector2>>();
@@ -40,9 +39,7 @@ public class AlphaBoundaryDetectionWindow : EditorWindow
             if (sourceTexture != null)
             {
                 alphaTexture = ExtractAlphaTexture(sourceTexture); // アルファテクスチャを抽出
-
-                (edgePoints , labelEdgePoints) = DetectAlphaEdges(alphaTexture); // エッジを検出
-                boundaries = TraceBoundariesFromEdges(alphaTexture, edgePoints); // エッジから境界をトレース
+                labelEdgePoints = DetectAlphaEdges(alphaTexture); // エッジを検出＆境界をトレース
                 Debug.Log("Boundary detection completed."); // 検出完了メッセージを出力
             }
             else
@@ -53,13 +50,8 @@ public class AlphaBoundaryDetectionWindow : EditorWindow
         }
 
         // 境界が検出されている場合に、検出された境界を表示
-        if (boundaries != null)
+        if (labelEdgePoints != null)
         {
-            if (GUILayout.Button("Save to CSV"))
-            {
-                SaveToCSV(boundaries, "Boundaries.csv");
-                Debug.Log("CSV file saved.");
-            }
 
             if (GUILayout.Button("Save to label CSV"))
             {
@@ -116,11 +108,10 @@ public class AlphaBoundaryDetectionWindow : EditorWindow
     }
 
     // アルファテクスチャからエッジを検出するメソッド
-    (List<Vector2>, List<List<Vector2>>) DetectAlphaEdges(Texture2D alphaTex)
+    List<List<Vector2>> DetectAlphaEdges(Texture2D alphaTex)
     {
         int width = alphaTex.width;
         int height = alphaTex.height;
-        List<Vector2> edgePoints = new List<Vector2>(); // エッジのリスト
         List<(List<Vector2>, int, int)> labelEdgePoints = new List<(List<Vector2>, int, int)>();
         List<int> sameLabels = new List<int>();
 
@@ -133,10 +124,8 @@ public class AlphaBoundaryDetectionWindow : EditorWindow
                 // 対象ピクセルがエッジなら
                 if (IsEdge(alphaTex, x, y))
                 {
-                    edgePoints.Add(new Vector2(x, y));
-
                     int labelFoundNum = -1;
-                    // 既存の線分ラベルに属しているか
+                    // 既存の線分ラベル分走査する
                     for (int labelNum = 0; labelNum < labelEdgePoints.Count; labelNum++)
                     {
                         (List<Vector2> labelEdgePoint, int firstEdgePointIndex, int endEdgePointIndex)
@@ -150,6 +139,7 @@ public class AlphaBoundaryDetectionWindow : EditorWindow
                         float currentDistance =  Vector2.Distance(currentEdgePoint, new Vector2(x, y));
                         float endDistance = Vector2.Distance(endEdgePoint, new Vector2(x, y));
 
+                        // 既存線分に属しているなら
                         if (firstDistance < 2 || endDistance < 2 || currentDistance < 2)
                         {
                             if (labelFoundNum == -1) // 別のラベルに割り当てられていないなら
@@ -211,33 +201,7 @@ public class AlphaBoundaryDetectionWindow : EditorWindow
             }
         }
 
-        return (edgePoints, margeLabelEdgePoints); // エッジポイントリストを返す
-    }
-
-    // エッジポイントから境界をトレースするメソッド
-    List<List<Vector2>> TraceBoundariesFromEdges(Texture2D alphaTex, List<Vector2> edgePoints)
-    {
-        int width = alphaTex.width;
-        int height = alphaTex.height;
-        bool[,] visited = new bool[width, height]; // 訪問済みフラグを管理する配列
-        List<List<Vector2>> boundaries = new List<List<Vector2>>(); // 境界のリスト
-
-        foreach (var point in edgePoints)
-        {
-            int x = (int)point.x;
-            int y = (int)point.y;
-            if (!visited[x, y])
-            {
-                List<Vector2> boundary = new List<Vector2>();
-                TraceBoundary(alphaTex, x, y, visited, boundary);
-                if (boundary.Count > 10)
-                {
-                    boundaries.Add(boundary);
-                }
-            }
-        }
-
-        return boundaries; // 境界リストを返す
+        return margeLabelEdgePoints; // エッジポイントリストを返す
     }
 
     // ピクセルがエッジであるかどうかを判定するメソッド
@@ -266,45 +230,6 @@ public class AlphaBoundaryDetectionWindow : EditorWindow
             }
         }
         return false; // 隣接ピクセルが全て不透明ならエッジではない
-    }
-
-    // 境界をトレースするメソッド
-    void TraceBoundary(Texture2D alphaTex, int startX, int startY, bool[,] visited, List<Vector2> boundary)
-    {
-        int width = alphaTex.width;
-        int height = alphaTex.height;
-        int x = startX;
-        int y = startY;
-        boundary.Add(new Vector2(x, y)); // 現在のピクセルを境界リストに追加
-        visited[x, y] = true; // 訪問済みとしてマーク
-
-        // 隣接ピクセルを定義
-        int[] dx = { 1, 1, 0, -1, -1, -1, 0, 1 };
-        int[] dy = { 0, 1, 1, 1, 0, -1, -1, -1 };
-
-        HashSet<Vector2> edgeSet = new HashSet<Vector2>(edgePoints); // edgePointsをセットに変換
-
-        while (true)
-        {
-            bool foundNext = false;
-            // 隣接ピクセルをチェックして、次のエッジピクセルを見つける
-            for (int i = 0; i < 8; i++)
-            {
-                int nx = x + dx[i];
-                int ny = y + dy[i];
-                if (nx >= 0 && nx < width && ny >= 0 && ny < height && !visited[nx, ny] && edgeSet.Contains(new Vector2(nx, ny)))
-                {
-                    x = nx;
-                    y = ny;
-                    boundary.Add(new Vector2(x, y)); // 新しいエッジピクセルを境界リストに追加
-                    visited[nx, ny] = true; // 訪問済みとしてマーク
-                    foundNext = true;
-                    break;
-                }
-            }
-            if (!foundNext) // 次のエッジピクセルが見つからない場合は終了
-                break;
-        }
     }
 
     // Ramer–Douglas–Peuckerアルゴリズムを使用して頂点を間引くメソッド

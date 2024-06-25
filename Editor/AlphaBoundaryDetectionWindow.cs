@@ -107,101 +107,99 @@ public class AlphaBoundaryDetectionWindow : EditorWindow
         return alphaTex; // アルファテクスチャを返す
     }
 
+    List<Vector2> DetectConsecutiveEdges(Texture2D alphaTex, int initX, int initY, int height, int width, HashSet<Vector2> scanndePixcel)
+    {
+        List<Vector2> edgeList = new List<Vector2>();
+        int x = initX;
+        int y = initY;
+
+        // 初期エッジ座標を追加
+        edgeList.Add(new Vector2(x, y));
+        scanndePixcel.Add(new Vector2(x, y));
+
+        // 前回の座標
+        int prevX = x;
+        int prevY = y;
+
+        while (true)
+        {
+            bool foundEdge = false;
+
+            int[] dx = {-1, 0, 1, 1};
+            int[] dy = {1, 1, 1, 0};
+
+            for (int i=0; i < 4; i++)
+            {
+                int currentX = x + dx[i];
+                int currentY = y + dy[i];
+
+                if (scanndePixcel.Contains(new Vector2(currentX, currentY)))
+                    continue;
+
+                scanndePixcel.Add(new Vector2(currentX, currentY));
+                if (IsEdge(alphaTex, currentX, currentY))
+                {
+                    x = currentX;
+                    y = currentY;
+                    foundEdge = true;
+                    break;
+                }
+            }
+
+            // エッジが見つからない場合は終了
+            if (!foundEdge)
+            {
+                break;
+            }
+
+            // 新しいエッジ座標を追加
+            edgeList.Add(new Vector2(x, y));
+
+            // 前回の座標が現在の座標と同じ場合はループを終了
+            if (prevX == x && prevY == y)
+            {
+                break;
+            }
+
+            // 前回の座標を更新
+            prevX = x;
+            prevY = y;
+        }
+
+        return edgeList;
+    }
+
     // アルファテクスチャからエッジを検出するメソッド
     List<List<Vector2>> DetectAlphaEdges(Texture2D alphaTex)
     {
         int width = alphaTex.width;
         int height = alphaTex.height;
-        List<(List<Vector2>, int, int)> labelEdgePoints = new List<(List<Vector2>, int, int)>();
-        List<int> sameLabels = new List<int>();
+        List<List<Vector2>> labelEdgePoints = new List<List<Vector2>>();
+
+        HashSet<Vector2> scanndePixcel = new HashSet<Vector2>();
 
         // 各ピクセルをループして、エッジを検出
         for (int y = 0; y < height; y++)
         {
-            Dictionary<int, int> firstEdgePoints = new Dictionary<int, int>();
             for (int x = 0; x < width; x++)
             {
+                if (scanndePixcel.Contains(new Vector2(x ,y)))
+                    continue;
+
                 // 対象ピクセルがエッジなら
                 if (IsEdge(alphaTex, x, y))
                 {
-                    int labelFoundNum = -1;
-                    // 既存の線分ラベル分走査する
-                    for (int labelNum = 0; labelNum < labelEdgePoints.Count; labelNum++)
-                    {
-                        (List<Vector2> labelEdgePoint, int firstEdgePointIndex, int endEdgePointIndex)
-                            = labelEdgePoints[labelNum];
-
-                        Vector2 firstEdgePoint = labelEdgePoint[firstEdgePointIndex];
-                        Vector2 currentEdgePoint = labelEdgePoint[labelEdgePoint.Count - 1];
-                        Vector2 endEdgePoint = labelEdgePoint[endEdgePointIndex];
-
-                        float firstDistance = Vector2.Distance(firstEdgePoint, new Vector2(x, y));
-                        float currentDistance =  Vector2.Distance(currentEdgePoint, new Vector2(x, y));
-                        float endDistance = Vector2.Distance(endEdgePoint, new Vector2(x, y));
-
-                        // 既存線分に属しているなら
-                        if (firstDistance < 2 || endDistance < 2 || currentDistance < 2)
-                        {
-                            if (labelFoundNum == -1) // 別のラベルに割り当てられていないなら
-                            {
-                                labelEdgePoint.Add(new Vector2(x, y));
-                                labelFoundNum = labelNum;
-                                if (!firstEdgePoints.ContainsKey(labelNum))
-                                    firstEdgePoints.Add(labelNum, labelEdgePoint.Count - 1);
-                            }
-                            else
-                            {
-                                if (sameLabels[labelFoundNum] == -1)
-                                    sameLabels[labelFoundNum] = sameLabels.Max() + 1;
-                                sameLabels[labelNum] = sameLabels[labelFoundNum];
-                            }
-                        }
-                    }
-                    if (labelFoundNum == -1)
-                    {
-                        labelEdgePoints.Add((new List<Vector2>() { new Vector2(x, y) }, 0, 0));
-                        sameLabels.Add(-1);
-                    }
+                    List<Vector2> edgePoint = DetectConsecutiveEdges(alphaTex, x, y, height, width, scanndePixcel);
+                    labelEdgePoints.Add(edgePoint);
                 }
             }
 
-            foreach (var firstEdgePoint in firstEdgePoints)
-            {
-                int endEdgePoint = labelEdgePoints[firstEdgePoint.Key].Item1.Count - 1;
-
-                var currentTuple = labelEdgePoints[firstEdgePoint.Key];
-                var newTuple = (currentTuple.Item1, firstEdgePoint.Value, endEdgePoint);
-                labelEdgePoints[firstEdgePoint.Key] = newTuple;
-            }
         }
 
         // 同じラベルのリストを1つにまとめる
-        List<List<Vector2>> margeLabelEdgePoints = new List<List<Vector2>>();
-        // labelの数分ループ
-        for (int labelNum = 0; labelNum <= sameLabels.Max(); labelNum++)
-        {
-            List<Vector2> edgePoint = new List<Vector2>();
-            // 線分のList分ループ
-            for (int edgePointNum = 0; edgePointNum < sameLabels.Count; edgePointNum++)
-            {
-                if (sameLabels[edgePointNum] == labelNum)
-                {
-                    edgePoint.AddRange(labelEdgePoints[edgePointNum].Item1);
-                }
-            }
-            if (edgePoint.Count != 0)
-                margeLabelEdgePoints.Add(edgePoint);
-        }
+        // List<List<Vector2>> margeLabelEdgePoints = new List<List<Vector2>>();
 
-        for (int edgePointNum = 0; edgePointNum < sameLabels.Count; edgePointNum++)
-        {
-            if (sameLabels[edgePointNum] == -1)
-            {
-                margeLabelEdgePoints.Add(labelEdgePoints[edgePointNum].Item1);
-            }
-        }
-
-        return margeLabelEdgePoints; // エッジポイントリストを返す
+        return labelEdgePoints; // エッジポイントリストを返す
     }
 
     // ピクセルがエッジであるかどうかを判定するメソッド

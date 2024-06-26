@@ -252,6 +252,9 @@ public class AlphaBoundaryDetectionWindow : EditorWindow
             }
             i++;
         }
+        // 取得された線分のうち、最大の長さのものを取得し、その3割りに満たない線分はノイズとして削除する
+        int maxLength = labelEdgePoints.Max(innerList => innerList.Count);
+        labelEdgePoints.RemoveAll(innerList => innerList.Count <= maxLength * 0.3);
 
         return labelEdgePoints; // エッジポイントリストを返す
     }

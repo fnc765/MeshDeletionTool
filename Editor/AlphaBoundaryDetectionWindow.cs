@@ -113,6 +113,8 @@ public class AlphaBoundaryDetectionWindow : EditorWindow
         int x = initX;
         int y = initY;
 
+        HashSet<Vector2> localScanndePixcel = new HashSet<Vector2>();
+
         // 初期エッジ座標を追加
         edgeList.Add(new Vector2(x, y));
         scanndePixcel.Add(new Vector2(x, y));
@@ -125,10 +127,10 @@ public class AlphaBoundaryDetectionWindow : EditorWindow
         {
             bool foundEdge = false;
 
-            int[] dx = {-1, 0, 1, 1};
-            int[] dy = {1, 1, 1, 0};
+            int[] dx = { -1,  0,  1,  1,  1,  0, -1, -1, -2, 2, 2, -2, -2, -2, 2, 2 };
+            int[] dy = {  1,  1,  1,  0, -1, -1, -1,  0,  2, 2, -2, -2,  2, -2, 2, -2 };
 
-            for (int i=0; i < 4; i++)
+            for (int i = 0; i < dx.Length; i++)
             {
                 int currentX = x + dx[i];
                 int currentY = y + dy[i];
@@ -166,6 +168,8 @@ public class AlphaBoundaryDetectionWindow : EditorWindow
             prevY = y;
         }
 
+        scanndePixcel.UnionWith(localScanndePixcel);
+
         return edgeList;
     }
 
@@ -198,12 +202,62 @@ public class AlphaBoundaryDetectionWindow : EditorWindow
 
         // 同じラベルのリストを1つにまとめる
         // List<List<Vector2>> margeLabelEdgePoints = new List<List<Vector2>>();
+        int i = 0;
+        while (i < labelEdgePoints.Count)
+        {
+            int j = i + 1;
+            while (j < labelEdgePoints.Count)
+            {
+                Vector2 edge1Start = labelEdgePoints[i][0];
+                Vector2 edge1End = labelEdgePoints[i][labelEdgePoints[i].Count - 1];
+                Vector2 edge2Start = labelEdgePoints[j][0];
+                Vector2 edge2End = labelEdgePoints[j][labelEdgePoints[j].Count - 1];
+                int threshold = 10;
+
+                bool merged = false;
+
+                if (Vector2.Distance(edge1End, edge2Start) < threshold)
+                {
+                    labelEdgePoints[i].AddRange(labelEdgePoints[j]);
+                    labelEdgePoints.RemoveAt(j);
+                    merged = true;
+                }
+                else if (Vector2.Distance(edge1End, edge2End) < threshold)
+                {
+                    labelEdgePoints[j].Reverse();
+                    labelEdgePoints[i].AddRange(labelEdgePoints[j]);
+                    labelEdgePoints.RemoveAt(j);
+                    merged = true;
+                }
+                else if (Vector2.Distance(edge1Start, edge2Start) < threshold)
+                {
+                    labelEdgePoints[i].Reverse();
+                    labelEdgePoints[i].AddRange(labelEdgePoints[j]);
+                    labelEdgePoints.RemoveAt(j);
+                    merged = true;
+                }
+                else if (Vector2.Distance(edge1Start, edge2End) < threshold)
+                {
+                    labelEdgePoints[i].Reverse();
+                    labelEdgePoints[j].Reverse();
+                    labelEdgePoints[i].AddRange(labelEdgePoints[j]);
+                    labelEdgePoints.RemoveAt(j);
+                    merged = true;
+                }
+
+                if (!merged)
+                {
+                    j++;
+                }
+            }
+            i++;
+        }
 
         return labelEdgePoints; // エッジポイントリストを返す
     }
 
     // ピクセルがエッジであるかどうかを判定するメソッド
-    bool IsEdge(Texture2D alphaTex, int x, int y, float threshold = 0.1f) // しきい値を追加
+    bool IsEdge(Texture2D alphaTex, int x, int y, float threshold = 0.5f) // しきい値を追加
     {
         float alpha = alphaTex.GetPixel(x, y).r;
         if (alpha <= threshold) // アルファがしきい値以下ならエッジではない

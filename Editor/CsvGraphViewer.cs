@@ -74,11 +74,17 @@ public class CSVGraphEditor : EditorWindow
             maxPoint = Vector2.Max(maxPoint, point);
         }
 
+        // グラデーションのために、色を変える処理を追加
         for (int i = 1; i < points.Count; i++)
         {
             Vector2 start = NormalizePoint(points[i - 1], minPoint, maxPoint, graphRect);
             Vector2 end = NormalizePoint(points[i], minPoint, maxPoint, graphRect);
-            Handles.DrawLine(start, end);
+
+            // グラデーションカラーの計算
+            float t = (float)i / (points.Count - 1); // 線が進む割合
+            Color color = Color.Lerp(Color.blue, Color.red, t); // 青から赤のグラデーション
+
+            DrawLineWithColor(start, end, color);
         }
     }
 
@@ -91,5 +97,12 @@ public class CSVGraphEditor : EditorWindow
         float yPos = graphRect.y + (1 - normalizedY) * graphRect.height;
 
         return new Vector2(xPos, yPos);
+    }
+
+    // 色付きの線を描画するメソッド
+    private void DrawLineWithColor(Vector2 start, Vector2 end, Color color)
+    {
+        Handles.color = color;
+        Handles.DrawLine(start, end);
     }
 }

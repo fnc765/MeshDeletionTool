@@ -27,6 +27,9 @@ namespace MeshDeletionTool
         private bool refinePartiallyCutTriangles = true;
         private int refineChordToleranceTexels = 0;
 
+        // 切断後の再結合: 細分化で増えた三角形を元の三角形ごとに結合し直す（細分化が有効なときのみ）
+        private bool mergeCutPolygons = true;
+
         // 直前の実行結果: サブメッシュ毎の、出力メッシュの三角形番号 → 対象オブジェクトの元のメッシュの三角形番号（テスト・診断用）
         internal List<int[]> lastOutputTriangleParents;
 
@@ -57,6 +60,7 @@ namespace MeshDeletionTool
             refineBoundary = EditorGUILayout.Toggle("境界の細分化", refineBoundary);
             EditorGUI.BeginDisabledGroup(!refineBoundary);
             refineMaxDepth = EditorGUILayout.IntSlider("細分化の最大深さ", refineMaxDepth, 0, 5);
+            mergeCutPolygons = EditorGUILayout.Toggle("切断後の再結合", mergeCutPolygons);
             EditorGUI.EndDisabledGroup();
 
             // サブメッシュを選択するリストを表示
@@ -144,6 +148,7 @@ namespace MeshDeletionTool
             Material[] originalMaterials = GetOriginalMaterials(targetRenderer);
             if (originalMesh == null)
                 return;
+            Mesh sourceMesh = originalMesh;   // 細分化前の元のメッシュ
 
             // 境界の細分化（削除処理の前に、アルファ境界付近の三角形を細分化したメッシュに置き換える）
             List<int[]> refinedTriangleParents = null;   // 細分化後の三角形番号 → 元の三角形番号
@@ -158,6 +163,14 @@ namespace MeshDeletionTool
             Mesh newMesh = CreateMeshAfterVertexModification(originalMesh, originalMaterials, removeVerticesIndexs, out List<int[]> sourceTriangleIndices);
             // 出力三角形 → 元の三角形の対応を保持する
             lastOutputTriangleParents = ComposeTriangleParents(sourceTriangleIndices, refinedTriangleParents);
+
+            // 切断後の再結合（細分化で増えた三角形を元の三角形ごとに結合し直す）
+            if (refinedTriangleParents != null && mergeCutPolygons)
+            {
+                // 出力メッシュの先頭には元のメッシュの頂点（削除されなかったもの）が並ぶ。これらは再結合で取り除かない
+                int keptOriginalVertexCount = sourceMesh.vertexCount - removeVerticesIndexs.Count(index => index < sourceMesh.vertexCount);
+                newMesh = MergeCutPolygons(newMesh, sourceMesh, keptOriginalVertexCount);
+            }
             // 新しいメッシュを保存
             SaveNewMesh(newMesh);
         }
@@ -171,6 +184,19 @@ namespace MeshDeletionTool
                 return false;
             }
             return true;
+        }
+
+        // 切断後のメッシュを元の三角形ごとに再結合したメッシュを返すメソッド
+        private Mesh MergeCutPolygons(Mesh cutMesh, Mesh sourceMesh, int keptOriginalVertexCount)
+        {
+            CutPolygonMerger merger = new CutPolygonMerger();
+            Mesh mergedMesh = merger.Merge(cutMesh, lastOutputTriangleParents, sourceMesh, keptOriginalVertexCount);
+            lastOutputTriangleParents = merger.ParentTriangleIndexPerSubMesh;
+            Debug.Log("切断後の再結合: 三角形 " + merger.TriangleCountBefore + " → " + merger.TriangleCountAfter +
+                      ", 頂点 " + merger.VertexCountBefore + " → " + merger.VertexCountAfter +
+                      " (再結合できなかった三角形 " + merger.FallbackCount + ": 穴 " + merger.FallbackHoleCount +
+                      ", 非多様体 " + merger.FallbackNonManifoldCount + ", 分割失敗 " + merger.FallbackTriangulationCount + ")");
+            return mergedMesh;
         }
 
         // 出力三角形 → 入力三角形の対応と、入力（細分化後）三角形 → 元の三角形の対応を合成する（細分化していなければそのまま）

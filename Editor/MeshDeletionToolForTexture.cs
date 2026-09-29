@@ -2,7 +2,6 @@ using UnityEngine;
 using UnityEditor;
 using System;
 using System.Collections.Generic;
-using System.Linq;
 
 namespace MeshDeletionTool
 {
@@ -20,27 +19,19 @@ namespace MeshDeletionTool
         // 境界の細分化: 削除処理の前にアルファ境界付近の三角形を細分化する（無効にすると従来の動作）
         private bool refineBoundary = true;
 
-        // 境界の精度（テクセル）: 切り口がテクスチャの境界からずれてよい量。小さいほど正確だがポリゴンが増える
-        // 細分化の許容誤差（この 2 倍）と切り口の間引きの許容誤差（この値）を決める
+        // 境界の精度（テクセル）: 切り口がテクスチャの境界からずれてよい量。小さいほど正確だがポリゴンが増える（MeshDeletionOptions 参照）
         private float boundaryPrecisionTexels = 1.0f;
 
         // 細分化の最大深さ（詳細設定）
         private int refineMaxDepth = 3;
 
-        // 一部の頂点が透明な三角形の細分化（修正2）と、その際に許容する失われる不透明テクセル数（境界の精度から決まる）
-        private bool refinePartiallyCutTriangles = true;
-        private int refineChordToleranceTexels = 2;
-
         // 切断後の再結合: 細分化で増えた三角形を元の三角形ごとに結合し直す（詳細設定、細分化が有効なときのみ）
         private bool mergeCutPolygons = true;
-
-        // 切り口の間引きの許容誤差（テクセル、境界の精度から決まる）
-        private float simplifyToleranceTexels = 1.0f;
 
         // 詳細設定の折りたたみ
         private bool showAdvancedSettings = false;
 
-        // テスト・計測用: null でなければ選択に関わらずこのバックエンドで処理する（呼び出し側が Dispose する）
+        // テスト・計測用: null でなければ自動選択の代わりにこのバックエンドで処理する（呼び出し側が Dispose する）
         internal IAlphaStageBackend backendOverride;
 
         // 1 テクセルの大きさ（mm）の表示用の概算
@@ -80,8 +71,6 @@ namespace MeshDeletionTool
             refineBoundary = EditorGUILayout.Toggle("境界の細分化", refineBoundary);
             EditorGUI.BeginDisabledGroup(!refineBoundary);
             boundaryPrecisionTexels = EditorGUILayout.Slider("境界の精度（テクセル）", boundaryPrecisionTexels, 0.5f, 4f);
-            refineChordToleranceTexels = Mathf.CeilToInt(2f * boundaryPrecisionTexels);
-            simplifyToleranceTexels = boundaryPrecisionTexels;
             if (targetRenderer != null)
             {
                 string texelSizeHint = texelSizeEstimator.GetHint(originalMesh, originalMaterials, subMeshIndex => subMeshVisibility.TryGetValue(subMeshIndex, out bool visible) && visible);
@@ -180,33 +169,21 @@ namespace MeshDeletionTool
             Mesh originalMesh = MeshDeletionRunner.GetOriginalMesh(targetRenderer);
             if (originalMesh == null)
                 return;
-            bool[] targetSubMeshes = GetTargetSubMeshes(originalMesh.subMeshCount);
-
-            // 要素毎の判定の実行先（細分化が有効で GPU が使えるときは GPU、それ以外は CPU。選んだ理由は 1 行のログに出す）
-            string backendNote = null;
-            IAlphaStageBackend backend = backendOverride ?? MeshDeletionRunner.CreateBackend(refineBoundary && refineMaxDepth > 0, out backendNote);
-            if (backendOverride == null)
-                Debug.Log(backendNote);
-
-            // 細分化 → 削除する頂点の判定 → 切断 → 再結合
-            AlphaMeshDeletionPipeline pipeline = new AlphaMeshDeletionPipeline
+            MeshDeletionOptions options = new MeshDeletionOptions
             {
                 AlphaThreshold = alphaThreshold,
                 RefineBoundary = refineBoundary,
+                BoundaryPrecisionTexels = boundaryPrecisionTexels,
                 RefineMaxDepth = refineMaxDepth,
-                RefinePartiallyCutTriangles = refinePartiallyCutTriangles,
-                RefineChordToleranceTexels = refineChordToleranceTexels,
-                MergeCutPolygons = mergeCutPolygons,
-                SimplifyToleranceTexels = simplifyToleranceTexels,
-                Backend = backend,
-                MeasureTime = true,
-                Log = Debug.Log
+                MergeAfterCut = mergeCutPolygons,
+                TargetSubMeshes = GetTargetSubMeshes(originalMesh.subMeshCount)
             };
-            MeshArrays newArrays;
+
+            // 細分化 → 削除する頂点の判定 → 切断 → 再結合（要素毎の判定の実行先は自動。GPU が使えなければ CPU）
+            MeshDeletionResult result;
             try
             {
-                newArrays = MeshDeletionRunner.Execute(targetRenderer, targetSubMeshes, pipeline);
-                Debug.Log(MeshDeletionRunner.DescribeResult(originalMesh.name, MeshArraysUnityAdapter.FromMesh(originalMesh), newArrays, pipeline));
+                result = MeshDeletionRunner.Run(targetRenderer, options, backendOverride);
             }
             catch (ArgumentException e)
             {
@@ -214,17 +191,11 @@ namespace MeshDeletionTool
                 Debug.LogError(e.Message);
                 return;
             }
-            finally
-            {
-                if (backendOverride == null)
-                    backend.Dispose();
-            }
-            lastOutputTriangleParents = pipeline.OutputTriangleParents;
+            Debug.Log(result.Summary);
+            lastOutputTriangleParents = result.OutputTriangleParents;
 
-            // 新しいメッシュを作成して保存（メッシュ名は元のメッシュ名 + "_deleted"。アセットのパスは従来通り固定）
-            Mesh newMesh = MeshArraysUnityAdapter.ToMesh(newArrays);
-            newMesh.name = originalMesh.name + "_deleted";
-            SaveNewMesh(newMesh);
+            // 新しいメッシュを保存する（メッシュ名は元のメッシュ名 + "_deleted"。アセットのパスは従来通り固定）
+            SaveNewMesh(result.Mesh);
         }
 
         // サブメッシュ毎の処理対象フラグ（チェックの無いサブメッシュは対象外）

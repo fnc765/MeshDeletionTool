@@ -73,7 +73,8 @@ namespace MeshDeletionTool
             sourceTriangleIndices = new List<int[]>(originalMesh.SubMeshCount);
 
             // 新規追加頂点の重複を避けるためにマッピング（辺の頂点インデックスの昇順ペアをキーとし、辺を共有する三角形で同じ頂点を使う）
-            Dictionary<(int, int), int> edgeVertexIndexMap = new Dictionary<(int, int), int>();
+            // 境界点の数は削除される頂点の数と同程度なので、その大きさで確保しておく
+            Dictionary<(int, int), int> edgeVertexIndexMap = new Dictionary<(int, int), int>(Math.Max(16, removeVerticesIndexs.Count));
 
             // 新規追加頂点を補完するための２点頂点インデックスと重みを、新規頂点インデックスをキーとして保持
             Dictionary<int, (int, int, float)> vertexInterpolation = new Dictionary<int, (int, int, float)>();
@@ -99,16 +100,24 @@ namespace MeshDeletionTool
             // removeVerticesIndexsからnonRemoveVerticesIndexsに含まれるインデックスを削除
             removeVerticesIndexs.RemoveAll(index => nonRemoveVerticesIndexs.Contains(index));
 
+            // 削除対象かどうかを頂点番号で直接参照できるようにする（リストの線形探索を三角形毎に繰り返さない）
+            bool[] isRemoved = new bool[originalMesh.VertexCount];
+            foreach (int index in removeVerticesIndexs)
+            {
+                isRemoved[index] = true;
+            }
+            int keptVertexCount = originalMesh.VertexCount - removeVerticesIndexs.Count;
+
             // 不要頂点を削除する
             for (int index = 0; index < originalMesh.VertexCount; index++)
             {
-                if (removeVerticesIndexs.Contains(index))
+                if (isRemoved[index])
                     continue;
                 newMeshData.AddElementFromMesh(originalMesh, index);
             }
 
             // インデックスマッピングの作成
-            Dictionary<int, int> oldToNewIndexMap = CreateIndexMap(originalMesh, removeVerticesIndexs);
+            int[] oldToNewIndexMap = CreateIndexMap(isRemoved);
 
 
             int subMeshCount = originalMesh.SubMeshCount;
@@ -133,9 +142,9 @@ namespace MeshDeletionTool
                         // 三角ポリゴンを構成する頂点インデックスと削除情報を含んだタプルを作成
                         List<(int index, bool isRemoved)> triangleIndexs = new List<(int index, bool isRemoved)>
                         {
-                            (triangles[i], removeVerticesIndexs.Contains(triangles[i])),
-                            (triangles[i + 1], removeVerticesIndexs.Contains(triangles[i + 1])),
-                            (triangles[i + 2], removeVerticesIndexs.Contains(triangles[i + 2]))
+                            (triangles[i], isRemoved[triangles[i]]),
+                            (triangles[i + 1], isRemoved[triangles[i + 1]]),
+                            (triangles[i + 2], isRemoved[triangles[i + 2]])
                         };
 
                         // 全ての頂点が削除対象の場合、三角形を追加しない
@@ -223,21 +232,25 @@ namespace MeshDeletionTool
             }
             newMesh.Bindposes = originalMesh.Bindposes;
 
-            CompletionBlendShapes(originalMesh, removeVerticesIndexs, newMesh, vertexInterpolation);
+            CompletionBlendShapes(originalMesh, isRemoved, keptVertexCount, newMesh, vertexInterpolation);
 
             return newMesh;
         }
 
-        // インデックスマッピングの作成
-        private Dictionary<int, int> CreateIndexMap(MeshArrays originalMesh, List<int> removeVerticesIndexs)
+        // インデックスマッピングの作成（元の頂点番号 → 削除後の頂点番号。削除された頂点は -1）
+        private static int[] CreateIndexMap(bool[] isRemoved)
         {
-            Dictionary<int, int> oldToNewIndexMap = new Dictionary<int, int>();
-            for (int oldIndex = 0, newIndex = 0; oldIndex < originalMesh.VertexCount; oldIndex++)
+            int[] oldToNewIndexMap = new int[isRemoved.Length];
+            for (int oldIndex = 0, newIndex = 0; oldIndex < isRemoved.Length; oldIndex++)
             {
-                if (!removeVerticesIndexs.Contains(oldIndex))
+                if (!isRemoved[oldIndex])
                 {
                     oldToNewIndexMap[oldIndex] = newIndex;
                     newIndex++;
+                }
+                else
+                {
+                    oldToNewIndexMap[oldIndex] = -1;
                 }
             }
             return oldToNewIndexMap;
@@ -245,7 +258,7 @@ namespace MeshDeletionTool
 
         // 削除対象でない頂点を多角形頂点に追加
         private (List<Vector3>, List<int>) addNonDeletableVertexToPolygon(MeshArrays originalMesh,
-                                                                          Dictionary<int, int> oldToNewIndexMap,
+                                                                          int[] oldToNewIndexMap,
                                                                           List<(int index, bool isRemoved)> triangleIndexs)
         {
             List<Vector3> originVertices = new List<Vector3>(); //処理対象の多角形の外形頂点
@@ -438,8 +451,22 @@ namespace MeshDeletionTool
         }
 
         // ブレンドシェイプを全フレームコピーし、削除された頂点を取り除き、辺上の新規頂点の差分を2頂点の差分の線形補間で補完する
-        protected void CompletionBlendShapes(MeshArrays originalMesh, List<int> removeVerticesIndexs, MeshArrays newMesh, Dictionary<int, (int, int, float)> blendShapeInterpolation)
+        // 出力の並びは残る頂点（元の頂点番号の昇順）、新規頂点（新規頂点番号の昇順）で、頂点属性の並びと一致する
+        protected void CompletionBlendShapes(MeshArrays originalMesh, bool[] isRemoved, int keptVertexCount, MeshArrays newMesh,
+                                             Dictionary<int, (int, int, float)> blendShapeInterpolation)
         {
+            // 残る頂点の番号と、新規頂点の補間情報（新規頂点番号の順）を先に求めておき、全フレームで使う
+            int[] keptIndices = new int[keptVertexCount];
+            for (int index = 0, k = 0; index < isRemoved.Length; index++)
+            {
+                if (!isRemoved[index])
+                {
+                    keptIndices[k++] = index;
+                }
+            }
+            List<(int, int, float)> interpolations = blendShapeInterpolation.OrderBy(kvp => kvp.Key).Select(kvp => kvp.Value).ToList();
+            int newVertexCount = keptVertexCount + interpolations.Count;
+
             // 1つの頂点に対して：ブレンドシェイプの数×ブレンドシェイプのフレーム分の頂点、法線、接線情報が必要
             // 元のメッシュの全ブレンドシェイプに対して処理を行う
             foreach (BlendShapeData shape in originalMesh.BlendShapes)
@@ -449,48 +476,32 @@ namespace MeshDeletionTool
                 // 各フレームに対して処理を行う
                 foreach (BlendShapeFrameData frame in shape.Frames)
                 {
-                    // フレームの頂点、法線、接線
-                    Vector3[] frameVertices = frame.DeltaVertices;
-                    Vector3[] frameNormals = frame.DeltaNormals;
-                    Vector3[] frameTangents = frame.DeltaTangents;
-
-                    // 配列をリストに変換
-                    List<Vector3> frameVerticesList = new List<Vector3>(frameVertices);
-                    List<Vector3> frameNormalsList = new List<Vector3>(frameNormals);
-                    List<Vector3> frameTangentsList = new List<Vector3>(frameTangents);
-
-                    // 指定されたインデックスの頂点、法線、接線をリストから削除
-                    foreach (int index in removeVerticesIndexs)
-                    {
-                        frameVerticesList.RemoveAt(index);
-                        frameNormalsList.RemoveAt(index);
-                        frameTangentsList.RemoveAt(index);
-                    }
-
-                    // 補完処理の追加（新規頂点は頂点インデックスの順に並べる。差分値なので正規化はしない）
-                    foreach (var kvp in blendShapeInterpolation.OrderBy(kvp => kvp.Key))
-                    {
-                        (int indexA, int indexB, float weight) = kvp.Value;
-
-                        // 頂点の補完
-                        frameVerticesList.Add(Vector3.Lerp(frameVertices[indexA], frameVertices[indexB], weight));
-                        // 法線の補完
-                        frameNormalsList.Add(Vector3.Lerp(frameNormals[indexA], frameNormals[indexB], weight));
-                        // 接線の補完
-                        frameTangentsList.Add(Vector3.Lerp(frameTangents[indexA], frameTangents[indexB], weight));
-                    }
-
-                    // 新しいメッシュにブレンドシェイプのフレームを追加
                     newShape.Frames.Add(new BlendShapeFrameData
                     {
                         Weight = frame.Weight,
-                        DeltaVertices = frameVerticesList.ToArray(),
-                        DeltaNormals = frameNormalsList.ToArray(),
-                        DeltaTangents = frameTangentsList.ToArray()
+                        DeltaVertices = CompactAndInterpolate(frame.DeltaVertices, keptIndices, interpolations, newVertexCount),
+                        DeltaNormals = CompactAndInterpolate(frame.DeltaNormals, keptIndices, interpolations, newVertexCount),
+                        DeltaTangents = CompactAndInterpolate(frame.DeltaTangents, keptIndices, interpolations, newVertexCount)
                     });
                 }
                 newMesh.BlendShapes.Add(newShape);
             }
+        }
+
+        // 差分配列から残る頂点の値を順に取り出し、続けて新規頂点の値を線形補間で追加する（差分値なので正規化はしない）
+        private static Vector3[] CompactAndInterpolate(Vector3[] deltas, int[] keptIndices, List<(int, int, float)> interpolations, int newVertexCount)
+        {
+            Vector3[] result = new Vector3[newVertexCount];
+            for (int k = 0; k < keptIndices.Length; k++)
+            {
+                result[k] = deltas[keptIndices[k]];
+            }
+            for (int m = 0; m < interpolations.Count; m++)
+            {
+                (int indexA, int indexB, float weight) = interpolations[m];
+                result[keptIndices.Length + m] = Vector3.Lerp(deltas[indexA], deltas[indexB], weight);
+            }
+            return result;
         }
     }
 }

@@ -1,5 +1,6 @@
 using UnityEngine;
 using UnityEditor;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using Unity.VisualScripting;
@@ -20,15 +21,30 @@ namespace MeshDeletionTool
         // 境界の細分化: 削除処理の前にアルファ境界付近の三角形を細分化する（無効にすると従来の動作）
         private bool refineBoundary = true;
 
-        // 細分化の最大深さ
+        // 境界の精度（テクセル）: 切り口がテクスチャの境界からずれてよい量。小さいほど正確だがポリゴンが増える
+        // 細分化の許容誤差（この 2 倍）と切り口の間引きの許容誤差（この値）を決める
+        private float boundaryPrecisionTexels = 1.0f;
+
+        // 細分化の最大深さ（詳細設定）
         private int refineMaxDepth = 3;
 
-        // （GUI非公開）一部の頂点が透明な三角形の細分化（修正2）と、その際に許容する失われる不透明テクセル数
+        // 一部の頂点が透明な三角形の細分化（修正2）と、その際に許容する失われる不透明テクセル数（境界の精度から決まる）
         private bool refinePartiallyCutTriangles = true;
-        private int refineChordToleranceTexels = 0;
+        private int refineChordToleranceTexels = 2;
 
-        // 切断後の再結合: 細分化で増えた三角形を元の三角形ごとに結合し直す（細分化が有効なときのみ）
+        // 切断後の再結合: 細分化で増えた三角形を元の三角形ごとに結合し直す（詳細設定、細分化が有効なときのみ）
         private bool mergeCutPolygons = true;
+
+        // 切り口の間引きの許容誤差（テクセル、境界の精度から決まる）
+        private float simplifyToleranceTexels = 1.0f;
+
+        // 詳細設定の折りたたみ
+        private bool showAdvancedSettings = false;
+
+        // 1 テクセルの大きさ（mm）の表示用キャッシュ
+        private Mesh texelSizeCacheMesh;
+        private Vector2Int[] texelSizeCacheTextureSizes;
+        private float[] texelSizeCacheMillimeters;
 
         // 直前の実行結果: サブメッシュ毎の、出力メッシュの三角形番号 → 対象オブジェクトの元のメッシュの三角形番号（テスト・診断用）
         internal List<int[]> lastOutputTriangleParents;
@@ -59,8 +75,25 @@ namespace MeshDeletionTool
             // 境界の細分化の設定
             refineBoundary = EditorGUILayout.Toggle("境界の細分化", refineBoundary);
             EditorGUI.BeginDisabledGroup(!refineBoundary);
-            refineMaxDepth = EditorGUILayout.IntSlider("細分化の最大深さ", refineMaxDepth, 0, 5);
-            mergeCutPolygons = EditorGUILayout.Toggle("切断後の再結合", mergeCutPolygons);
+            boundaryPrecisionTexels = EditorGUILayout.Slider("境界の精度（テクセル）", boundaryPrecisionTexels, 0.5f, 4f);
+            refineChordToleranceTexels = Mathf.CeilToInt(2f * boundaryPrecisionTexels);
+            simplifyToleranceTexels = boundaryPrecisionTexels;
+            if (targetRenderer != null)
+            {
+                string texelSizeHint = GetTexelSizeHint(GetOriginalMesh(targetRenderer), GetOriginalMaterials(targetRenderer));
+                if (texelSizeHint != null)
+                {
+                    EditorGUILayout.LabelField(" ", texelSizeHint, EditorStyles.miniLabel);
+                }
+            }
+            showAdvancedSettings = EditorGUILayout.Foldout(showAdvancedSettings, "詳細設定");
+            if (showAdvancedSettings)
+            {
+                EditorGUI.indentLevel++;
+                refineMaxDepth = EditorGUILayout.IntSlider("細分化の最大深さ", refineMaxDepth, 0, 5);
+                mergeCutPolygons = EditorGUILayout.Toggle("切断後の再結合", mergeCutPolygons);
+                EditorGUI.indentLevel--;
+            }
             EditorGUI.EndDisabledGroup();
 
             // サブメッシュを選択するリストを表示
@@ -107,6 +140,91 @@ namespace MeshDeletionTool
             {
                 DeleteMeshesFromTexture();
             }
+        }
+
+        // 「1 テクセル ≈ 0.6〜0.9 mm」のような表示文字列を返す（処理対象のサブメッシュの範囲。対象が無ければテクスチャを持つ全サブメッシュ）
+        private string GetTexelSizeHint(Mesh mesh, Material[] materials)
+        {
+            if (mesh == null || materials == null)
+                return null;
+            Vector2Int[] textureSizes = GetTextureSizes(mesh.subMeshCount, materials);
+            if (texelSizeCacheMesh != mesh || texelSizeCacheTextureSizes == null || !TextureSizesEqual(texelSizeCacheTextureSizes, textureSizes))
+            {
+                texelSizeCacheMesh = mesh;
+                texelSizeCacheTextureSizes = textureSizes;
+                texelSizeCacheMillimeters = ComputeTexelSizeMillimeters(mesh, textureSizes);
+            }
+            float min = float.MaxValue, max = 0f;
+            for (int pass = 0; pass < 2 && max == 0f; pass++)
+            {
+                for (int subMeshIndex = 0; subMeshIndex < texelSizeCacheMillimeters.Length; subMeshIndex++)
+                {
+                    bool isTarget = subMeshVisibility.TryGetValue(subMeshIndex, out bool visible) && visible;
+                    float size = texelSizeCacheMillimeters[subMeshIndex];
+                    if ((pass == 0 && !isTarget) || size <= 0f)
+                        continue;
+                    min = Mathf.Min(min, size);
+                    max = Mathf.Max(max, size);
+                }
+            }
+            if (max == 0f)
+                return null;
+            string range = min.ToString("0.0") == max.ToString("0.0") ? min.ToString("0.0") : min.ToString("0.0") + "〜" + max.ToString("0.0");
+            return "1 テクセル ≈ " + range + " mm（対象のテクスチャ解像度とメッシュから概算）";
+        }
+
+        // サブメッシュ毎のメインテクスチャの解像度（テクスチャが無ければ 0）
+        private static Vector2Int[] GetTextureSizes(int subMeshCount, Material[] materials)
+        {
+            Vector2Int[] sizes = new Vector2Int[subMeshCount];
+            for (int subMeshIndex = 0; subMeshIndex < subMeshCount; subMeshIndex++)
+            {
+                Texture texture = subMeshIndex < materials.Length && materials[subMeshIndex] != null ? materials[subMeshIndex].mainTexture : null;
+                if (texture != null)
+                    sizes[subMeshIndex] = new Vector2Int(texture.width, texture.height);
+            }
+            return sizes;
+        }
+
+        private static bool TextureSizesEqual(Vector2Int[] a, Vector2Int[] b)
+        {
+            if (a.Length != b.Length)
+                return false;
+            for (int i = 0; i < a.Length; i++)
+            {
+                if (a[i] != b[i])
+                    return false;
+            }
+            return true;
+        }
+
+        // サブメッシュ毎に 1 テクセルあたりの大きさ（mm）を求める: sqrt(3D 面積の合計 / テクセル空間での UV 面積の合計)
+        private static float[] ComputeTexelSizeMillimeters(Mesh mesh, Vector2Int[] textureSizes)
+        {
+            Vector3[] vertices = mesh.vertices;
+            Vector2[] uvs = mesh.uv;
+            float[] result = new float[mesh.subMeshCount];
+            if (uvs.Length != vertices.Length)
+                return result;
+            for (int subMeshIndex = 0; subMeshIndex < mesh.subMeshCount; subMeshIndex++)
+            {
+                Vector2Int size = textureSizes[subMeshIndex];
+                if (size.x <= 1 || size.y <= 1)
+                    continue;
+                Vector2 scale = new Vector2(size.x - 1, size.y - 1);
+                int[] triangles = mesh.GetTriangles(subMeshIndex);
+                double area3D = 0.0, areaTexel = 0.0;
+                for (int i = 0; i + 2 < triangles.Length; i += 3)
+                {
+                    Vector3 a = vertices[triangles[i]], b = vertices[triangles[i + 1]], c = vertices[triangles[i + 2]];
+                    area3D += 0.5 * Vector3.Cross(b - a, c - a).magnitude;
+                    Vector2 ta = Vector2.Scale(uvs[triangles[i]], scale), tb = Vector2.Scale(uvs[triangles[i + 1]], scale), tc = Vector2.Scale(uvs[triangles[i + 2]], scale);
+                    areaTexel += 0.5 * Mathf.Abs((tb.x - ta.x) * (tc.y - ta.y) - (tb.y - ta.y) * (tc.x - ta.x));
+                }
+                if (areaTexel > 0.0)
+                    result[subMeshIndex] = (float)Math.Sqrt(area3D / areaTexel) * 1000f;
+            }
+            return result;
         }
 
         // サブメッシュのテクスチャを表示するメソッド
@@ -169,7 +287,7 @@ namespace MeshDeletionTool
             {
                 // 出力メッシュの先頭には元のメッシュの頂点（削除されなかったもの）が並ぶ。これらは再結合で取り除かない
                 int keptOriginalVertexCount = sourceMesh.vertexCount - removeVerticesIndexs.Count(index => index < sourceMesh.vertexCount);
-                newMesh = MergeCutPolygons(newMesh, sourceMesh, keptOriginalVertexCount);
+                newMesh = MergeCutPolygons(newMesh, sourceMesh, originalMaterials, keptOriginalVertexCount);
             }
             // 新しいメッシュを保存
             SaveNewMesh(newMesh);
@@ -187,14 +305,22 @@ namespace MeshDeletionTool
         }
 
         // 切断後のメッシュを元の三角形ごとに再結合したメッシュを返すメソッド
-        private Mesh MergeCutPolygons(Mesh cutMesh, Mesh sourceMesh, int keptOriginalVertexCount)
+        private Mesh MergeCutPolygons(Mesh cutMesh, Mesh sourceMesh, Material[] originalMaterials, int keptOriginalVertexCount)
         {
-            CutPolygonMerger merger = new CutPolygonMerger();
-            Mesh mergedMesh = merger.Merge(cutMesh, lastOutputTriangleParents, sourceMesh, keptOriginalVertexCount);
+            // 切り口の間引きは処理対象のサブメッシュのテクスチャ解像度に対するテクセル単位で行う
+            Vector2Int[] textureSizes = GetTextureSizes(sourceMesh.subMeshCount, originalMaterials);
+            for (int subMeshIndex = 0; subMeshIndex < textureSizes.Length; subMeshIndex++)
+            {
+                if (!subMeshVisibility.TryGetValue(subMeshIndex, out bool isTarget) || !isTarget)
+                    textureSizes[subMeshIndex] = Vector2Int.zero;
+            }
+            CutPolygonMerger merger = new CutPolygonMerger { SimplifyToleranceTexels = simplifyToleranceTexels };
+            Mesh mergedMesh = merger.Merge(cutMesh, lastOutputTriangleParents, sourceMesh, keptOriginalVertexCount, textureSizes);
             lastOutputTriangleParents = merger.ParentTriangleIndexPerSubMesh;
             Debug.Log("切断後の再結合: 三角形 " + merger.TriangleCountBefore + " → " + merger.TriangleCountAfter +
                       ", 頂点 " + merger.VertexCountBefore + " → " + merger.VertexCountAfter +
-                      " (再結合できなかった三角形 " + merger.FallbackCount + ": 穴 " + merger.FallbackHoleCount +
+                      " (一直線上の頂点の削除 " + merger.RemovedFlatVertexCount + ", 切り口の間引き " + merger.RemovedChainVertexCount +
+                      ", 再結合できなかった三角形 " + merger.FallbackCount + ": 穴 " + merger.FallbackHoleCount +
                       ", 非多様体 " + merger.FallbackNonManifoldCount + ", 分割失敗 " + merger.FallbackTriangulationCount + ")");
             return mergedMesh;
         }

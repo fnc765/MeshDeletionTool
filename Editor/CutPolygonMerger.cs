@@ -10,10 +10,18 @@ namespace MeshDeletionTool
     // 隣の三角形が必要としない限り取り除き、残った多角形を耳切り法で三角形分割し直す。
     // 頂点の追加・移動は行わない（参照されなくなった頂点はブレンドシェイプも含めて最後に詰める）ため、
     // 属性の再補間は不要で、隣接する元三角形との間に隙間（T字接合）も生じない。
+    // さらに SimplifyToleranceTexels > 0 のとき、元三角形の内部だけを通る切り口の頂点列（隣の三角形と共有しない頂点）を
+    // Douglas-Peucker 法でテクセル単位の許容誤差以内に間引く（頂点を取り除くだけで動かさない）。
     public class CutPolygonMerger
     {
         // 外周上の頂点を「一直線上」とみなす角度の許容値（sin）
         public float CollinearTolerance = 1e-4f;
+
+        // 切り口の間引きの許容誤差（テクセル単位、0 で間引かない）
+        public float SimplifyToleranceTexels = 0f;
+
+        // 頂点が元の三角形の辺上にあるとみなす重心座標の許容値
+        public float OnEdgeTolerance = 1e-4f;
 
         // 実行結果
         public int TriangleCountBefore;
@@ -27,6 +35,7 @@ namespace MeshDeletionTool
         public int FallbackTriangulationCount;     // 三角形分割に失敗したため再結合しなかった元三角形の数
         public int DroppedDegenerateLoopCount;     // 面積0になり捨てた外周の数
         public int RemovedFlatVertexCount;         // 取り除いた一直線上の頂点の数
+        public int RemovedChainVertexCount;        // 間引いた切り口の頂点の数
         public int FallbackCount => FallbackHoleCount + FallbackNonManifoldCount + FallbackTriangulationCount;
 
         // 実行結果: サブメッシュ毎の、再結合後の三角形番号 → 元の三角形番号
@@ -36,7 +45,9 @@ namespace MeshDeletionTool
         //   parentTriangleIndexPerSubMesh: サブメッシュ毎の、cutMesh の三角形番号 → originalMesh の三角形番号
         //   originalMesh: 細分化前の元のメッシュ（元の三角形の平面を得るために使う）
         //   protectedVertexCount: cutMesh の先頭からこの数の頂点は元のメッシュの頂点であり、決して取り除かない
-        public Mesh Merge(Mesh cutMesh, List<int[]> parentTriangleIndexPerSubMesh, Mesh originalMesh, int protectedVertexCount)
+        //   textureSizePerSubMesh: 切り口の間引きに使うサブメッシュ毎のテクスチャ解像度（null または 0 のサブメッシュは間引かない）
+        public Mesh Merge(Mesh cutMesh, List<int[]> parentTriangleIndexPerSubMesh, Mesh originalMesh, int protectedVertexCount,
+                          Vector2Int[] textureSizePerSubMesh = null)
         {
             int subMeshCount = cutMesh.subMeshCount;
             int[][] triangles = new int[subMeshCount][];
@@ -49,17 +60,18 @@ namespace MeshDeletionTool
                 originalTriangles[subMeshIndex] = originalMesh.GetTriangles(subMeshIndex);
             }
 
-            int[][] mergedTriangles = MergeTriangles(cutMesh.vertices, triangles, parents, originalMesh.vertices, originalTriangles,
-                                                     protectedVertexCount, out int[][] mergedParents);
+            int[][] mergedTriangles = MergeTriangles(cutMesh.vertices, cutMesh.uv, triangles, parents, originalMesh.vertices, originalTriangles,
+                                                     protectedVertexCount, textureSizePerSubMesh, out int[][] mergedParents);
             ParentTriangleIndexPerSubMesh = new List<int[]>(mergedParents);
 
             return CompactMesh(cutMesh, mergedTriangles);
         }
 
         // 再結合の本体（Mesh に依存しない）。サブメッシュ毎の新しい三角形配列を返す。頂点番号は入力のまま（詰めない）
-        internal int[][] MergeTriangles(Vector3[] positions, int[][] triangles, int[][] parents,
+        // uvs / textureSizes は切り口の間引きに使う（null なら間引かない）
+        internal int[][] MergeTriangles(Vector3[] positions, Vector2[] uvs, int[][] triangles, int[][] parents,
                                         Vector3[] originalPositions, int[][] originalTriangles,
-                                        int protectedVertexCount, out int[][] newParents)
+                                        int protectedVertexCount, Vector2Int[] textureSizes, out int[][] newParents)
         {
             ResetStatistics();
             TriangleCountBefore = 0;
@@ -87,7 +99,19 @@ namespace MeshDeletionTool
                 AddTwins(vertex, twins, wanted);
             }
 
+            // 切り口の間引きに使うテクセル座標（頂点UV × テクスチャ解像度）
+            Vector2[] texelSizes = new Vector2[triangles.Length];
+            for (int subMeshIndex = 0; subMeshIndex < triangles.Length; subMeshIndex++)
+            {
+                if (SimplifyToleranceTexels > 0f && uvs != null && uvs.Length == positions.Length &&
+                    textureSizes != null && subMeshIndex < textureSizes.Length && textureSizes[subMeshIndex].x > 1 && textureSizes[subMeshIndex].y > 1)
+                {
+                    texelSizes[subMeshIndex] = new Vector2(textureSizes[subMeshIndex].x - 1, textureSizes[subMeshIndex].y - 1);
+                }
+            }
+
             // 2. 多角形を三角形分割する。失敗した集まりは元の三角形のまま残し、その頂点を必要とする集まりをやり直す
+            HashSet<int> removedChain = new HashSet<int>();
             Queue<Group> queue = new Queue<Group>();
             foreach (Group group in groups)
             {
@@ -101,7 +125,7 @@ namespace MeshDeletionTool
             {
                 Group group = queue.Dequeue();
                 group.Queued = false;
-                if (TriangulateGroup(group, positions, protectedVertexCount, wanted))
+                if (TriangulateGroup(group, protectedVertexCount, wanted, groupsByVertex, uvs, texelSizes[group.SubMeshIndex], removedChain))
                 {
                     continue;
                 }
@@ -177,6 +201,7 @@ namespace MeshDeletionTool
                 TriangleCountAfter += output.Count / 3;
             }
             RemovedFlatVertexCount = removedFlat.Count;
+            RemovedChainVertexCount = removedChain.Count;
             return result;
         }
 
@@ -185,7 +210,7 @@ namespace MeshDeletionTool
             TriangleCountBefore = TriangleCountAfter = VertexCountBefore = VertexCountAfter = 0;
             MergedGroupCount = MultiPieceCount = 0;
             FallbackHoleCount = FallbackNonManifoldCount = FallbackTriangulationCount = 0;
-            DroppedDegenerateLoopCount = RemovedFlatVertexCount = 0;
+            DroppedDegenerateLoopCount = RemovedFlatVertexCount = RemovedChainVertexCount = 0;
         }
 
         private enum GroupKind
@@ -208,6 +233,7 @@ namespace MeshDeletionTool
             public Dictionary<int, Vector2> Planar = new Dictionary<int, Vector2>();   // 頂点 → 元三角形の平面上の2次元座標
             public List<int[]> Loops = new List<int[]>();          // 外周（反時計回り）
             public HashSet<int> Flat = new HashSet<int>();         // 外周上で一直線上に並ぶ頂点
+            public HashSet<int> OnEdge = new HashSet<int>();       // 元の三角形の辺上にある頂点（間引かない）
             public List<int> Emitted = new List<int>();            // 再結合後の三角形
             public HashSet<int> EmittedVertices = new HashSet<int>();
         }
@@ -250,10 +276,11 @@ namespace MeshDeletionTool
             HashSet<int> seen = new HashSet<int>();
             foreach (int vertex in triangles)
             {
-                if (seen.Add(vertex))
+                if (!seen.Add(vertex))
                 {
-                    group.Vertices.Add(vertex);
+                    continue;
                 }
+                group.Vertices.Add(vertex);
                 if (vertex >= protectedVertexCount)
                 {
                     allProtected = false;
@@ -262,7 +289,7 @@ namespace MeshDeletionTool
                         list = new List<Group>();
                         groupsByVertex[vertex] = list;
                     }
-                    list.Add(group);
+                    list.Add(group);   // 集まりごとに1回だけ登録する（複数の集まりから使われる頂点 = 共有頂点）
                 }
             }
 
@@ -288,10 +315,21 @@ namespace MeshDeletionTool
                 MarkAllWanted(group, protectedVertexCount, wanted);
                 return;
             }
+            Vector2 planarB = new Vector2(Vector3.Dot(b - a, e1), 0f);
+            Vector2 planarC = new Vector2(Vector3.Dot(c - a, e1), Vector3.Dot(c - a, e2));
             foreach (int vertex in group.Vertices)
             {
                 Vector3 d = positions[vertex] - a;
-                group.Planar[vertex] = new Vector2(Vector3.Dot(d, e1), Vector3.Dot(d, e2));
+                Vector2 planar = new Vector2(Vector3.Dot(d, e1), Vector3.Dot(d, e2));
+                group.Planar[vertex] = planar;
+                // 重心座標のいずれかが 0 に近ければ元の三角形の辺上（隣の三角形と共有される可能性がある）
+                float gamma = planarC.y != 0f ? planar.y / planarC.y : 0f;
+                float beta = planarB.x != 0f ? (planar.x - gamma * planarC.x) / planarB.x : 0f;
+                float alpha = 1f - beta - gamma;
+                if (Mathf.Min(alpha, Mathf.Min(beta, gamma)) < OnEdgeTolerance)
+                {
+                    group.OnEdge.Add(vertex);
+                }
             }
 
             // 各三角形の向きを元の三角形に揃え、有向辺を数える
@@ -400,7 +438,8 @@ namespace MeshDeletionTool
         }
 
         // 集まりの外周から不要な頂点を取り除いて三角形分割し、group.Emitted に格納する。失敗したら false
-        private bool TriangulateGroup(Group group, Vector3[] positions, int protectedVertexCount, HashSet<int> wanted)
+        private bool TriangulateGroup(Group group, int protectedVertexCount, HashSet<int> wanted, Dictionary<int, List<Group>> groupsByVertex,
+                                      Vector2[] uvs, Vector2 texelSize, HashSet<int> removedChain)
         {
             group.Emitted.Clear();
             group.EmittedVertices.Clear();
@@ -415,6 +454,11 @@ namespace MeshDeletionTool
                         continue;
                     }
                     polygon.Add(vertex);
+                }
+                // この三角形の内部だけを通る切り口の頂点を間引く
+                if (texelSize.x > 0f && polygon.Count >= 3)
+                {
+                    SimplifyChain(group, polygon, protectedVertexCount, groupsByVertex, uvs, texelSize, removedChain);
                 }
                 if (polygon.Count < 3)
                 {
@@ -486,6 +530,113 @@ namespace MeshDeletionTool
                     added?.Add(twin);
                 }
             }
+        }
+
+        // 外周のうち固定されない頂点（元の頂点でも、元の三角形の辺上でも、他の集まりと共有でもない切り口の頂点）の連なりを、
+        // 固定された頂点の間ごとに Douglas-Peucker 法でテクセル空間で間引く。頂点は取り除くだけで動かさない
+        private void SimplifyChain(Group group, List<int> polygon, int protectedVertexCount, Dictionary<int, List<Group>> groupsByVertex,
+                                   Vector2[] uvs, Vector2 texelSize, HashSet<int> removedChain)
+        {
+            int count = polygon.Count;
+            Vector2[] texels = new Vector2[count];
+            bool[] keep = new bool[count];
+            List<int> anchors = new List<int>();
+            for (int i = 0; i < count; i++)
+            {
+                int vertex = polygon[i];
+                texels[i] = Vector2.Scale(uvs[vertex], texelSize);
+                keep[i] = vertex < protectedVertexCount || group.OnEdge.Contains(vertex) ||
+                          (groupsByVertex.TryGetValue(vertex, out List<Group> users) && users.Count > 1);
+                if (keep[i])
+                {
+                    anchors.Add(i);
+                }
+            }
+            if (anchors.Count == 0)
+            {
+                // 三角形の内部で閉じた切り口（島）: 先頭、先頭から最も遠い点、その弦から最も遠い点を固定する
+                int farthest = 0;
+                for (int i = 1; i < count; i++)
+                {
+                    if ((texels[i] - texels[0]).sqrMagnitude > (texels[farthest] - texels[0]).sqrMagnitude) farthest = i;
+                }
+                int offChord = 0;
+                float maxDistance = -1f;
+                for (int i = 0; i < count; i++)
+                {
+                    float distance = DistanceToSegment(texels[i], texels[0], texels[farthest]);
+                    if (distance > maxDistance) { maxDistance = distance; offChord = i; }
+                }
+                keep[0] = keep[farthest] = keep[offChord] = true;
+                anchors.Add(0);
+                if (farthest != 0) anchors.Add(farthest);
+                if (offChord != 0 && offChord != farthest) anchors.Add(offChord);
+                anchors.Sort();
+            }
+            // 固定された頂点の間の連なりごとに間引く
+            for (int k = 0; k < anchors.Count; k++)
+            {
+                int start = anchors[k];
+                int end = anchors[(k + 1) % anchors.Count];
+                int length = ((end - start) % count + count) % count;   // start から end までの辺の数（巡回）
+                if (length < 2)
+                {
+                    continue;
+                }
+                List<int> run = new List<int>(length + 1);
+                for (int i = 0; i <= length; i++)
+                {
+                    run.Add((start + i) % count);
+                }
+                DouglasPeucker(texels, run, 0, run.Count - 1, SimplifyToleranceTexels, keep);
+            }
+            for (int i = count - 1; i >= 0; i--)
+            {
+                if (!keep[i])
+                {
+                    removedChain.Add(polygon[i]);
+                    polygon.RemoveAt(i);
+                }
+            }
+        }
+
+        // run[first] と run[last] を結ぶ線分から最も離れた点が許容誤差を超えていればその点を残して再帰する
+        private static void DouglasPeucker(Vector2[] texels, List<int> run, int first, int last, float tolerance, bool[] keep)
+        {
+            if (last - first < 2)
+            {
+                return;
+            }
+            int farthest = -1;
+            float maxDistance = tolerance;
+            for (int i = first + 1; i < last; i++)
+            {
+                float distance = DistanceToSegment(texels[run[i]], texels[run[first]], texels[run[last]]);
+                if (distance > maxDistance)
+                {
+                    maxDistance = distance;
+                    farthest = i;
+                }
+            }
+            if (farthest < 0)
+            {
+                return;
+            }
+            keep[run[farthest]] = true;
+            DouglasPeucker(texels, run, first, farthest, tolerance, keep);
+            DouglasPeucker(texels, run, farthest, last, tolerance, keep);
+        }
+
+        // 点から線分 ab を含む直線までの距離（a と b が同じ点なら a までの距離）
+        private static float DistanceToSegment(Vector2 point, Vector2 a, Vector2 b)
+        {
+            Vector2 d = b - a;
+            float length = d.magnitude;
+            if (length <= 0f)
+            {
+                return (point - a).magnitude;
+            }
+            return Mathf.Abs((point.x - a.x) * d.y - (point.y - a.y) * d.x) / length;
         }
 
         private static void MarkAllWanted(Group group, int protectedVertexCount, HashSet<int> wanted)

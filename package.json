@@ -10,6 +10,6 @@
     },
     "license": "SEE LICENSE IN README.md",
     "vpmDependencies": {
-        "nadena.dev.ndmf": ">=1.4.0"
+        "nadena.dev.ndmf": ">=1.8.0"
     }
 }

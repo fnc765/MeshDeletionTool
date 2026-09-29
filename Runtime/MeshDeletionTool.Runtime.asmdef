@@ -19,7 +19,7 @@
         },
         {
             "name": "nadena.dev.ndmf",
-            "expression": "",
+            "expression": "1.8.0",
             "define": "NDMF"
         }
     ],

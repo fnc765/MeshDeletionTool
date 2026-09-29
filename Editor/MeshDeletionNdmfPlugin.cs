@@ -14,6 +14,10 @@ namespace MeshDeletionTool
     // NDMF プラグイン: アバターのビルド（プレイモードに入るときの Apply on Play と、アップロード）のたびに、アバター内の MeshDeletionForTexture を処理する
     // Transforming フェーズで Modular Avatar の後に実行し、各コンポーネントの Renderer のメッシュを削った結果（メモリ上の新しい Mesh）に置き換え、
     // コンポーネントを取り除く。シーン上の元のメッシュ・アセットは変更しない
+    // NDMF はプラグインを既定で VRChat アバター（nadena.dev.ndmf.vrchat.avatar3）でだけ実行する（それ以外のプラットフォームでは実行しない空の処理に置き換える）。
+    // メッシュの削除はプラットフォームに依存しないので RunsOnAllPlatforms を付ける（NDMF 1.8.0 以降）
+    // Modular Avatar が無いプロジェクトでも AfterPlugin("nadena.dev.modular-avatar") はエラーにならない（NDMF は存在しないプラグインへの順序指定を無視する）
+    [RunsOnAllPlatforms]
     public class MeshDeletionNdmfPlugin : Plugin<MeshDeletionNdmfPlugin>
     {
         public override string QualifiedName => "com.ochoco.mesh-deletion-tool";

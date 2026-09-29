@@ -5,6 +5,8 @@ namespace MeshDeletionTool
     // テクスチャの透明部分に合わせて、このオブジェクトの Renderer（SkinnedMeshRenderer、または MeshRenderer と MeshFilter）のメッシュを削る設定
     // 付けただけでは何もしない。NDMF がプレイモードに入るときとアバターのアップロード時に、削った結果のメッシュを生成して Renderer のメッシュを置き換え、
     // このコンポーネントを取り除く（非破壊: 元のメッシュ・アセットは変更しない）。設定の意味はウィンドウ版（Tools/MeshDeletionToolForTexture）と同じ
+    // アバター（VRC Avatar Descriptor など）の配下にないものは、プレイモードでは MeshDeletionTool の簡易適用が置き換える。インスペクターのプレビューで、
+    // プレイモードに入らずに結果を表示できる（NDMF のプレビュー。シーンは変更しない）
     // VRChat SDK があるときは IEditorOnly（アップロード時に取り除かれる）、NDMF があるときは INDMFEditorOnly を実装する
     [AddComponentMenu("MeshDeletionTool/MeshDeletionForTexture")]
     [DisallowMultipleComponent]

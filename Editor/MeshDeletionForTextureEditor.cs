@@ -25,7 +25,23 @@ namespace MeshDeletionTool
             refineMaxDepth = serializedObject.FindProperty(nameof(MeshDeletionForTexture.refineMaxDepth));
             mergeAfterCut = serializedObject.FindProperty(nameof(MeshDeletionForTexture.mergeAfterCut));
             subMeshEnabled = serializedObject.FindProperty(nameof(MeshDeletionForTexture.subMeshEnabled));
+#if NDMF
+            MeshDeletionPreviewFilter.Toggle.IsEnabled.OnChange += OnPreviewToggleChanged;
+#endif
         }
+
+#if NDMF
+        private void OnDisable()
+        {
+            MeshDeletionPreviewFilter.Toggle.IsEnabled.OnChange -= OnPreviewToggleChanged;
+        }
+
+        // NDMF のプレビュー設定ウィンドウから切り替えられたときもボタンの表示を合わせる
+        private void OnPreviewToggleChanged(bool enabled)
+        {
+            Repaint();
+        }
+#endif
 
         public override void OnInspectorGUI()
         {
@@ -51,11 +67,8 @@ namespace MeshDeletionTool
                 else if (MeshDeletionRunner.FindMeshProblem(mesh, true) is string problem)
                     EditorGUILayout.HelpBox(problem, MessageType.Error);
             }
-#if NDMF
-            EditorGUILayout.HelpBox(MeshDeletionForTexture.Note, MessageType.Info);
-#else
-            EditorGUILayout.HelpBox(MeshDeletionForTexture.Note + "\nNDMF（Non-Destructive Modular Framework）が見つかりません。VCC / ALCOM で nadena.dev.ndmf をプロジェクトに追加してください（Modular Avatar を入れていれば一緒に入ります）。", MessageType.Warning);
-#endif
+            DrawPlayModeNote(component);
+            DrawPreviewControls();
 
             // 設定（ウィンドウ版と同じ名前）
             EditorGUILayout.PropertyField(alphaThreshold, new GUIContent("アルファ閾値", alphaThreshold.tooltip));
@@ -95,6 +108,69 @@ namespace MeshDeletionTool
             }
 
             serializedObject.ApplyModifiedProperties();
+        }
+
+        // プレイモードで誰が置き換えるか（NDMF / 簡易適用 / しない）の注意書き。判定は簡易適用（MeshDeletionPlayModeApplier）と同じ
+        private static void DrawPlayModeNote(MeshDeletionForTexture component)
+        {
+            switch (MeshDeletionPlayModeApplier.ApplierFor(component))
+            {
+                case PlayModeApplier.Ndmf:
+                    EditorGUILayout.HelpBox(MeshDeletionForTexture.Note, MessageType.Info);
+                    break;
+                case PlayModeApplier.None:
+                    EditorGUILayout.HelpBox("NDMF の Apply on Play（Tools/NDM Framework/Apply on Play）がオフのため、プレイモードでは置き換えません。アバターのアップロード時は NDMF が置き換えます。", MessageType.Warning);
+                    break;
+                default:
+#if NDMF
+                    EditorGUILayout.HelpBox("アバター（VRC Avatar Descriptor）の配下にないため、プレイモードでは MeshDeletionTool の簡易適用で置き換えます（プレイモードを終えると元に戻ります）。アップロード時の置き換えはアバターの配下でのみ行われます。", MessageType.Info);
+#else
+                    EditorGUILayout.HelpBox("NDMF（Non-Destructive Modular Framework）1.8.0 以降が見つかりません。プレイモードでは MeshDeletionTool の簡易適用で置き換えますが、アップロード時には置き換わりません。" +
+                                            "VCC / ALCOM で nadena.dev.ndmf をプロジェクトに追加してください（Modular Avatar を入れていれば一緒に入ります）。", MessageType.Warning);
+#endif
+                    break;
+            }
+        }
+
+        // プレビューのボタンと状態。NDMF のプレビュー（MeshDeletionPreviewFilter）を切り替える。シーン上の全ての MeshDeletionForTexture で共通
+        private static void DrawPreviewControls()
+        {
+#if NDMF
+            bool previewOn = MeshDeletionPreviewFilter.Toggle.IsEnabled.Value;
+            EditorGUI.BeginDisabledGroup(EditorApplication.isPlayingOrWillChangePlaymode);
+            bool requested = GUILayout.Toggle(previewOn, previewOn ? "プレビュー: オン" : "プレビュー: オフ", "Button");
+            EditorGUI.EndDisabledGroup();
+            if (requested != previewOn)
+            {
+                MeshDeletionPreviewFilter.Toggle.IsEnabled.Value = requested;
+                SceneView.RepaintAll();
+            }
+
+            if (EditorApplication.isPlayingOrWillChangePlaymode)
+            {
+                EditorGUILayout.LabelField("プレイモード中はプレビューしません。", EditorStyles.miniLabel);
+            }
+            else if (!previewOn)
+            {
+                EditorGUILayout.LabelField("オンにすると、プレイモードに入らずに適用後の表示を確認できます。", EditorStyles.miniLabel);
+            }
+            else if (!Menu.GetChecked(MeshDeletionPreviewFilter.NdmfEnablePreviewsMenu))
+            {
+                EditorGUILayout.HelpBox("NDMF のプレビューが無効になっているため表示されません（" + MeshDeletionPreviewFilter.NdmfEnablePreviewsMenu + "）。", MessageType.Warning);
+                if (GUILayout.Button("NDMF のプレビューを有効にする"))
+                    EditorApplication.ExecuteMenuItem(MeshDeletionPreviewFilter.NdmfEnablePreviewsMenu);
+            }
+            else
+            {
+                EditorGUILayout.HelpBox("プレビュー中（NDMF）: シーン上の全ての MeshDeletionForTexture を適用した表示です。NDMF が作る表示用のコピーだけを変えるので、" +
+                                        "元のメッシュ・シーン・プレハブは変更されず、保存もされません。", MessageType.Info);
+            }
+#else
+            EditorGUI.BeginDisabledGroup(true);
+            GUILayout.Toggle(false, "プレビュー: オフ", "Button");
+            EditorGUI.EndDisabledGroup();
+            EditorGUILayout.LabelField("プレビューには NDMF 1.8.0 以降が必要です。", EditorStyles.miniLabel);
+#endif
         }
 
         // subMeshEnabled の長さをサブメッシュ数に合わせる（空から広げるときはテクスチャを持つサブメッシュを対象に、途中から広げるときは対象にする）

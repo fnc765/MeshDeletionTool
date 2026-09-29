@@ -74,6 +74,7 @@ namespace MeshDeletionTool
             public MeshArrays Output;
         }
 
+        // 計測して報告の文字列を返す。途中で例外が出ても報告に残す（バッファは Measure の finally で、テクスチャの設定は CollectAlphaMasks の using で戻る）
         private string Run()
         {
             if (targetRenderer == null)
@@ -87,6 +88,22 @@ namespace MeshDeletionTool
                 return meshProblem;
 
             StringBuilder text = new StringBuilder();
+            try
+            {
+                Measure(originalMesh, originalMaterials, text);
+            }
+            catch (Exception e)
+            {
+                text.AppendLine();
+                text.AppendLine("ベンチマークの実行中に例外が発生したため中断しました: " + e);
+                Debug.LogException(e);
+            }
+            return text.ToString();
+        }
+
+        // 報告を text に書きながら計測する
+        private void Measure(Mesh originalMesh, Material[] originalMaterials, StringBuilder text)
+        {
             text.AppendLine("MeshDeletionTool ベンチマーク  " + DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"));
             text.AppendLine("GPU: " + SystemInfo.graphicsDeviceName + " (" + SystemInfo.graphicsDeviceType + ", Compute Shader " + (SystemInfo.supportsComputeShaders ? "対応" : "非対応") + ")");
             text.AppendLine("CPU: " + SystemInfo.processorType + " x" + SystemInfo.processorCount + ", Unity " + Application.unityVersion);
@@ -111,7 +128,7 @@ namespace MeshDeletionTool
             if (targetSubMeshes.Count(t => t) == 0)
             {
                 text.AppendLine("テクスチャを持つサブメッシュが無いため計測できません。");
-                return text.ToString();
+                return;
             }
 
             // バックエンド毎に計測
@@ -161,7 +178,6 @@ namespace MeshDeletionTool
             {
                 text.AppendLine("| " + label + " | " + before + " | " + after + " |");
             }
-            return text.ToString();
         }
 
         // 1 つのバックエンドで iterations + 1 回実行し（最初の 1 回は捨てる）、処理段毎の時間と最後の出力を返す

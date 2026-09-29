@@ -264,8 +264,8 @@ namespace MeshDeletionTool
         {
             MeshData newMeshData = new MeshData();
 
-            // 新規追加頂点の重複を避けるためにマッピング
-            Dictionary<Vector3, int> addVertexIndexMap = new Dictionary<Vector3, int>();
+            // 新規追加頂点の重複を避けるためにマッピング（辺の頂点インデックスの昇順ペアをキーとし、辺を共有する三角形で同じ頂点を使う）
+            Dictionary<(int, int), int> edgeVertexIndexMap = new Dictionary<(int, int), int>();
 
             // 新規追加頂点を補完するための２点頂点インデックスと重みを、新規頂点インデックスをキーとして保持
             Dictionary<int, (int, int, float)> vertexInterpolation = new Dictionary<int, (int, int, float)>();
@@ -298,9 +298,6 @@ namespace MeshDeletionTool
                 newMeshData.AddElementFromMesh(originalMesh, index);
             }
             
-            // 重複している頂点(シーム)のインデックスリストを作成
-            HashSet<int> seamVertexIndex = CreateSeamIndex(originalMesh);
-
             // インデックスマッピングの作成
             Dictionary<int, int> oldToNewIndexMap = CreateIndexMap(originalMesh, removeVerticesIndexs);
 
@@ -362,8 +359,7 @@ namespace MeshDeletionTool
 
                             // 追加頂点の中で重複が無いように全体メッシュへ頂点を追加する（既存頂点はシームなどで重複がある）
                             // シェイプキー用補完重みも同様に重複を排除する
-                            addUniqueMeshData(addMeshData, triangleIndexs, seamVertexIndex,
-                                            newMeshData, polygonToGlobalIndexMap, addVertexIndexMap,
+                            addUniqueMeshData(addMeshData, newMeshData, polygonToGlobalIndexMap, edgeVertexIndexMap,
                                             localVertexInterpolation, vertexInterpolation);
 
                             // 処理対象の多角形の外形頂点としてまとめる
@@ -408,29 +404,6 @@ namespace MeshDeletionTool
             CompletionBlendShapes(originalMesh, removeVerticesIndexs, newMesh, vertexInterpolation);
 
             return newMesh;
-        }
-
-        // 重複している頂点(シーム)のインデックスリストを作成 
-        private HashSet<int> CreateSeamIndex(Mesh mesh)
-        {
-            Dictionary<Vector3, int> seamVertex = new Dictionary<Vector3, int>();
-            HashSet<int> seamVertexIndex = new HashSet<int>();
-
-            for (int index = 0; index < mesh.vertexCount; index++)
-            {
-                Vector3 vertex = mesh.vertices[index];
-                // シームの頂点かどうかをチェックし、インデックスを格納
-                if (seamVertex.ContainsKey(vertex))
-                {
-                    seamVertexIndex.Add(seamVertex[vertex]); // 既に存在する頂点なので、そのインデックスを追加
-                    seamVertexIndex.Add(index); // 現在のインデックスも追加
-                }
-                else
-                {
-                    seamVertex.Add(vertex, index); // 新しい頂点を追加
-                }
-            }
-            return seamVertexIndex;
         }
 
         // インデックスマッピングの作成
@@ -483,12 +456,12 @@ namespace MeshDeletionTool
                 // 三角形の各辺に対して、テクスチャ境界値の座標&UV座標の計算
                 for (int triangleIndex = 0; triangleIndex < 3; triangleIndex++)
                 {
-                    (MeshData newMeshDataVertex, float wight) = 
+                    (MeshData newMeshDataVertex, (int, int, float) interpolation) =
                         AddEdgeIntersectionPoints(originalMesh, texture, sideIndexs[triangleIndex]);
                     if (newMeshDataVertex.Vertices.Count > 0) // テクスチャ境界値があるなら
                     {
-                        // ２つの頂点と重みを保存（対象三角ポリゴンでのローカルな座標インデックスで管理）
-                        localVertexInterpolation.Add((sideIndexs[triangleIndex][0], sideIndexs[triangleIndex][1], wight));
+                        // ２つの頂点（インデックス昇順）と重みを保存
+                        localVertexInterpolation.Add(interpolation);
                         addMeshData.Add(newMeshDataVertex); //多角形頂点に追加   
                     }
                 }
@@ -496,12 +469,16 @@ namespace MeshDeletionTool
             return (addMeshData, localVertexInterpolation);
         }
 
-        // originalMeshのエッジとテクスチャの境界点を検出し、エッジ交点のUV座標と新しい頂点座標を返す関数
-        private (MeshData, float) AddEdgeIntersectionPoints(Mesh originalMesh, Texture2D texture, int[] indexs)
+        // originalMeshのエッジとテクスチャの境界点を検出し、新しい頂点のMeshDataと補完情報（両端の頂点インデックス昇順, 重み）を返す関数
+        private (MeshData, (int, int, float)) AddEdgeIntersectionPoints(Mesh originalMesh, Texture2D texture, int[] indexs)
         {
+            // エッジの両端点を頂点インデックスの昇順に並べる
+            // （辺を共有する三角形は辺を逆向きに辿るため、向きに依存する二分探索では境界点が1ulp程度ずれて別の頂点になっていた）
+            int[] edge = indexs[0] < indexs[1] ? new int[] { indexs[0], indexs[1] } : new int[] { indexs[1], indexs[0] };
+
             // エッジの両端点のUV座標を取得
-            Vector2 uv1 = originalMesh.uv[indexs[0]];
-            Vector2 uv2 = originalMesh.uv[indexs[1]];
+            Vector2 uv1 = originalMesh.uv[edge[0]];
+            Vector2 uv2 = originalMesh.uv[edge[1]];
             MeshData newMeshDataVertex = new MeshData();
             float weight = 0;
 
@@ -509,11 +486,11 @@ namespace MeshDeletionTool
             if (IsBoundaryEdge(texture, uv1, uv2))
             {
                 // 境界エッジの場合、境界点のUV座標と頂点座標を計算
-                weight = FindAlphaBoundary(originalMesh, texture, indexs);
-                newMeshDataVertex = VertexCompletion(originalMesh, indexs, weight);
+                weight = FindAlphaBoundary(originalMesh, texture, edge);
+                newMeshDataVertex = VertexCompletion(originalMesh, edge, weight);
             }
 
-            return (newMeshDataVertex, weight);
+            return (newMeshDataVertex, (edge[0], edge[1], weight));
         }
 
         // UV座標が示すテクスチャのピクセルが境界エッジかどうかを判定する関数
@@ -612,31 +589,29 @@ namespace MeshDeletionTool
             return newMeshDataVertex;
         }
 
-        // 追加頂点の中で重複が無いように全体メッシュへ追加する（既存頂点はシームなどで重複がある）
-        private void addUniqueMeshData(MeshData addMeshData, List<(int index, bool isRemoved)> triangleIndexs,
-                                       HashSet<int> seamVertexIndex,
-                                       MeshData newMeshData, List<int> polygonToGlobalIndexMap, 
-                                       Dictionary<Vector3, int> addVertexIndexMap,
+        // 追加頂点の中で重複が無いように全体メッシュへ追加する
+        // 同じ辺（頂点インデックスのペア）上の境界点は1つの頂点として共有する。辺を頂点インデックスで判定するため、
+        // シーム（座標は同じだが頂点インデックスが異なる辺）の両側には別々の頂点が作られ、UVなどの属性は混ざらない
+        private void addUniqueMeshData(MeshData addMeshData, MeshData newMeshData, List<int> polygonToGlobalIndexMap,
+                                       Dictionary<(int, int), int> edgeVertexIndexMap,
                                        List<(int, int, float)> localVertexInterpolation,
                                        Dictionary<int, (int, int, float)> vertexInterpolation)
         {
             for (int j = 0; j < addMeshData.Vertices.Count; j++)
             {
-                Vector3 vertex = addMeshData.Vertices[j];
-                Vector2 uv = addMeshData.UV[j];
-                if (!addVertexIndexMap.ContainsKey(vertex)) {//追加頂点の座標マップに含まれない座標の場合
-                    //TODO: 本来は継ぎ目の辺へ新規頂点追加時の判定が必要だが、簡易的に対象ポリゴン頂点がシーム頂点に含まれているかで判定している
-                    //継ぎ目の辺でないなら
-                    if (!seamVertexIndex.Contains(triangleIndexs[0].index) &&
-                        !seamVertexIndex.Contains(triangleIndexs[1].index) &&
-                        !seamVertexIndex.Contains(triangleIndexs[2].index)) {
-                        addVertexIndexMap[vertex] = newMeshData.Vertices.Count;  //追加頂点の重複防止Mapに追加
-                    }
+                (int indexA, int indexB, float weight) = localVertexInterpolation[j];
+                if (edgeVertexIndexMap.TryGetValue((indexA, indexB), out int existingIndex))
+                {
+                    // 既に同じ辺に頂点が追加されているならそれを使う
+                    polygonToGlobalIndexMap.Add(existingIndex);
+                }
+                else
+                {
                     newMeshData.Add(addMeshData.GetElementAt(j));
-                    polygonToGlobalIndexMap.Add(newMeshData.Vertices.Count - 1);
-                    vertexInterpolation.Add(newMeshData.Vertices.Count - 1, localVertexInterpolation[j]);
-                } else {
-                    polygonToGlobalIndexMap.Add(addVertexIndexMap[vertex]);
+                    int newIndex = newMeshData.Vertices.Count - 1;
+                    edgeVertexIndexMap[(indexA, indexB)] = newIndex;
+                    polygonToGlobalIndexMap.Add(newIndex);
+                    vertexInterpolation.Add(newIndex, (indexA, indexB, weight));
                 }
             }
         }

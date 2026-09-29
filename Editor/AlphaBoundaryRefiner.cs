@@ -120,12 +120,13 @@ namespace MeshDeletionTool
             {
                 return false;
             }
-            List<Vector2> removedPolygon = BuildRemovedPolygon(texture, uv, transparent, alphaThreshold);
+            int[] index = { indexA, indexB, indexC };
+            List<Vector2> removedPolygon = BuildRemovedPolygon(texture, uv, index, transparent, alphaThreshold);
             return CountOpaqueTexels(texture, removedPolygon, alphaThreshold, ChordToleranceTexels + 1) > ChordToleranceTexels;
         }
 
         // 既存処理と同じ境界点（辺上の二分探索）を使い、三角形のうち削除される側の多角形（UV座標、外周順）を作る
-        private static List<Vector2> BuildRemovedPolygon(Texture2D texture, Vector2[] uv, bool[] transparent, float alphaThreshold)
+        private static List<Vector2> BuildRemovedPolygon(Texture2D texture, Vector2[] uv, int[] index, bool[] transparent, float alphaThreshold)
         {
             List<Vector2> polygon = new List<Vector2>(4);
             for (int i = 0; i < 3; i++)
@@ -135,11 +136,12 @@ namespace MeshDeletionTool
                 {
                     polygon.Add(uv[i]);
                 }
-                // 辺の向きも既存処理（辺 (0,1), (1,2), (2,0)）と同じにして同一の境界点を得る
                 if (MeshDeletionToolForTexture.IsBoundaryEdge(texture, uv[i], uv[j], alphaThreshold))
                 {
-                    float weight = MeshDeletionToolForTexture.FindAlphaBoundary(texture, uv[i], uv[j], alphaThreshold);
-                    polygon.Add(Vector2.Lerp(uv[i], uv[j], weight));
+                    // 辺の向きも既存処理と同じ（頂点インデックスの昇順）にして同一の境界点を得る
+                    (Vector2 uvA, Vector2 uvB) = index[i] < index[j] ? (uv[i], uv[j]) : (uv[j], uv[i]);
+                    float weight = MeshDeletionToolForTexture.FindAlphaBoundary(texture, uvA, uvB, alphaThreshold);
+                    polygon.Add(Vector2.Lerp(uvA, uvB, weight));
                 }
             }
             return polygon;

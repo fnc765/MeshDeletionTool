@@ -52,14 +52,21 @@ public class MeshVertexRemoverTest
         Assert.AreEqual(new[] { 0, 1, 2 }, result.SubMeshTriangles[1]);   // (0,2,3) → (0,1,2)
     }
 
-    // 従来の動作: 三角形が全て消えたサブメッシュ 0 には全サブメッシュの残った三角形が連結されて残る（Mesh.triangles に設定してから
-    // 三角形の残るサブメッシュだけを個別に設定していたため）。互換性のために保っている
+    // 三角形が全て消えたサブメッシュは空のまま残る（サブメッシュの数と順番、マテリアルとの対応を保つ）。
+    // かつては空になったサブメッシュ 0 に他のサブメッシュの三角形が連結されて残り、マテリアル 0 で二重に描かれていた
     [Test]
-    public void RemoveVertices_EmptiedSubMeshZero_KeepsConcatenatedTriangles()
+    public void RemoveVertices_EmptiedSubMesh_StaysEmpty()
     {
         MeshArrays mesh = MeshCoreTestUtils.Grid(1);
         mesh.SubMeshTriangles = new[] { new[] { 0, 1, 2 }, new[] { 0, 2, 3 } };
         MeshArrays result = MeshVertexRemover.RemoveVertices(mesh, new List<int> { 1 });
+        Assert.AreEqual(2, result.SubMeshCount);
+        Assert.AreEqual(new int[0], result.SubMeshTriangles[0]);
+        Assert.AreEqual(new[] { 0, 1, 2 }, result.SubMeshTriangles[1]);
+
+        // サブメッシュ 1 側が空になる場合も同様
+        result = MeshVertexRemover.RemoveVertices(mesh, new List<int> { 3 });
         Assert.AreEqual(new[] { 0, 1, 2 }, result.SubMeshTriangles[0]);
+        Assert.AreEqual(new int[0], result.SubMeshTriangles[1]);
     }
 }

@@ -49,16 +49,15 @@ namespace MeshDeletionTool
                 }
             }
 
-            // 従来の処理は全サブメッシュの三角形を連結して Mesh.triangles に設定した後、三角形の残るサブメッシュだけを個別に設定していた。
-            // そのため三角形が全て削除されたサブメッシュ 0 には連結した全三角形が残る。この振る舞いをそのまま保っている
-            List<int> allTriangles = new List<int>();
-            RemoveTriangles(originalMesh.GetAllTriangles(), isRemoved, oldToNewIndexMap, allTriangles);
+            // サブメッシュ毎に、削除された頂点を使わない三角形だけを残す。三角形が全て消えたサブメッシュは空のまま残す
+            // （サブメッシュの数と順番を保ち、マテリアルとの対応がずれないようにする。かつては空になったサブメッシュ 0 に全三角形が残っていた）
             newMesh.SubMeshTriangles = new int[originalMesh.SubMeshCount][];
             for (int subMeshIndex = 0; subMeshIndex < originalMesh.SubMeshCount; subMeshIndex++)
             {
-                newMesh.SubMeshTriangles[subMeshIndex] = subMeshIndex == 0 ? allTriangles.ToArray() : new int[0];
+                List<int> newTriangles = new List<int>();
+                RemoveTriangles(originalMesh.GetTriangles(subMeshIndex), isRemoved, oldToNewIndexMap, newTriangles);
+                newMesh.SubMeshTriangles[subMeshIndex] = newTriangles.ToArray();
             }
-            RemoveSubMeshes(originalMesh, isRemoved, oldToNewIndexMap, newMesh);
             RemoveBlendShapes(originalMesh, keptIndices, newMesh);
 
             return newMesh;
@@ -79,22 +78,6 @@ namespace MeshDeletionTool
                     newTrianglesList.Add(oldToNewIndexMap[index0]);
                     newTrianglesList.Add(oldToNewIndexMap[index1]);
                     newTrianglesList.Add(oldToNewIndexMap[index2]);
-                }
-            }
-        }
-
-        private static void RemoveSubMeshes(MeshArrays originalMesh, bool[] isRemoved, int[] oldToNewIndexMap, MeshArrays newMesh)
-        {
-            int subMeshCount = originalMesh.SubMeshCount;
-
-            for (int subMeshIndex = 0; subMeshIndex < subMeshCount; subMeshIndex++)
-            {
-                List<int> newTriangles = new List<int>();
-                RemoveTriangles(originalMesh.GetTriangles(subMeshIndex), isRemoved, oldToNewIndexMap, newTriangles);
-
-                if (newTriangles.Count > 0)
-                {
-                    newMesh.SubMeshTriangles[subMeshIndex] = newTriangles.ToArray();
                 }
             }
         }

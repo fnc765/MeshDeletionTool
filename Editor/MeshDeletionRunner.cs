@@ -7,8 +7,79 @@ namespace MeshDeletionTool
     // テクスチャの透明部分に基づくメッシュ削除の、Unity のオブジェクト（Renderer / Mesh / Material / Texture2D）に対する入口
     // Mesh とテクスチャの読み出しと結果の検証だけをここで行い、処理本体（細分化・判定・切断・再結合）は Unity に依存しない AlphaMeshDeletionPipeline が行う
     // ウィンドウ（MeshDeletionToolForTexture）とヘッドレスの呼び出しが共通に使う。保存はしない
+    // MeshDeletionRunner.Run の結果
+    internal sealed class MeshDeletionResult
+    {
+        // 削った結果のメッシュ（保存されていない）
+        public Mesh Mesh;
+        // 1 行の要約（頂点数・三角形数の変化と処理段毎の時間）
+        public string Summary;
+        // サブメッシュ毎の、出力メッシュの三角形番号 → 元のメッシュの三角形番号
+        public List<int[]> OutputTriangleParents;
+    }
+
     internal static class MeshDeletionRunner
     {
+        // 設定に従って renderer のメッシュを削り、新しい Mesh（名前は元のメッシュ名 + "_deleted"。保存はしない）と要約を返す
+        // 要素毎の判定の実行先は自動で選ぶ（backendOverride があればそれを使い、Dispose は呼び出し側が行う）
+        // メッシュが処理できない形（メッシュ無し、三角形でないサブメッシュ、UV 無し）なら ArgumentException を投げる
+        internal static MeshDeletionResult Run(Renderer renderer, MeshDeletionOptions options, IAlphaStageBackend backendOverride = null)
+        {
+            if (renderer == null)
+                throw new ArgumentNullException(nameof(renderer));
+            if (options == null)
+                throw new ArgumentNullException(nameof(options));
+            Mesh originalMesh = GetOriginalMesh(renderer);
+            if (originalMesh == null)
+                throw new ArgumentException("対象オブジェクトに有効なメッシュがありません。", nameof(renderer));
+
+            string backendNote = null;
+            IAlphaStageBackend backend = backendOverride ?? CreateBackend(options.RefineEnabled, out backendNote);
+            if (backendNote != null)
+                Debug.Log(backendNote);
+            AlphaMeshDeletionPipeline pipeline = options.CreatePipeline(backend, Debug.Log);
+            MeshArrays sourceArrays, newArrays;
+            try
+            {
+                newArrays = Execute(renderer, options.TargetSubMeshes, pipeline, out sourceArrays);
+            }
+            finally
+            {
+                if (backendOverride == null)
+                    backend.Dispose();
+            }
+
+            Mesh newMesh = MeshArraysUnityAdapter.ToMesh(newArrays);
+            newMesh.name = originalMesh.name + "_deleted";
+            return new MeshDeletionResult
+            {
+                Mesh = newMesh,
+                Summary = DescribeResult(originalMesh.name, sourceArrays, newArrays, pipeline),
+                OutputTriangleParents = pipeline.OutputTriangleParents
+            };
+        }
+
+        // MeshDeletionForTexture コンポーネントの設定を MeshDeletionOptions にする（subMeshCount は対象メッシュのサブメッシュ数）
+        // subMeshEnabled が空ならテクスチャを持つ全サブメッシュ（TargetSubMeshes = null）
+        internal static MeshDeletionOptions OptionsFromComponent(MeshDeletionForTexture component, int subMeshCount)
+        {
+            MeshDeletionOptions options = new MeshDeletionOptions
+            {
+                AlphaThreshold = component.alphaThreshold,
+                RefineBoundary = component.refineBoundary,
+                BoundaryPrecisionTexels = component.boundaryPrecisionTexels,
+                RefineMaxDepth = component.refineMaxDepth,
+                MergeAfterCut = component.mergeAfterCut
+            };
+            if (component.subMeshEnabled != null && component.subMeshEnabled.Length > 0)
+            {
+                options.TargetSubMeshes = new bool[subMeshCount];
+                for (int subMeshIndex = 0; subMeshIndex < subMeshCount; subMeshIndex++)
+                    options.TargetSubMeshes[subMeshIndex] = component.IsSubMeshEnabled(subMeshIndex);
+            }
+            return options;
+        }
+
         // Renderer が描いている Mesh（SkinnedMeshRenderer の sharedMesh、または MeshRenderer と同じオブジェクトの MeshFilter の sharedMesh）
         // 無ければ null（logError ならエラーも出す）
         internal static Mesh GetOriginalMesh(Renderer targetRenderer, bool logError = true)
@@ -102,6 +173,12 @@ namespace MeshDeletionTool
         // メッシュが処理できない形（三角形でないサブメッシュ、UV 無し）なら、テクスチャを読む前に ArgumentException を投げる
         internal static MeshArrays Execute(Renderer renderer, bool[] targetSubMeshes, AlphaMeshDeletionPipeline pipeline)
         {
+            return Execute(renderer, targetSubMeshes, pipeline, out MeshArrays _);
+        }
+
+        // sourceArrays に読み出した元のメッシュを返す版
+        internal static MeshArrays Execute(Renderer renderer, bool[] targetSubMeshes, AlphaMeshDeletionPipeline pipeline, out MeshArrays sourceArrays)
+        {
             if (renderer == null)
                 throw new ArgumentNullException(nameof(renderer));
             Mesh originalMesh = GetOriginalMesh(renderer);
@@ -128,7 +205,7 @@ namespace MeshDeletionTool
 
             // テクスチャのアルファ値とメッシュの頂点属性を一度だけ読み出す（テクスチャを読めないサブメッシュは処理対象から外れる）
             AlphaMask[] subMeshMasks = CollectAlphaMasks(originalMesh.subMeshCount, originalMaterials, targetSubMeshes);
-            MeshArrays sourceArrays = MeshArraysUnityAdapter.FromMesh(originalMesh);
+            sourceArrays = MeshArraysUnityAdapter.FromMesh(originalMesh);
 
             // 細分化 → 削除する頂点の判定 → 切断 → 再結合
             return pipeline.Run(sourceArrays, subMeshMasks, targetSubMeshes);

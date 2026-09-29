@@ -46,10 +46,10 @@ namespace MeshDeletionTool
         //   originalMesh: 細分化前の元のメッシュ（元の三角形の平面を得るために使う）
         //   protectedVertexCount: cutMesh の先頭からこの数の頂点は元のメッシュの頂点であり、決して取り除かない
         //   textureSizePerSubMesh: 切り口の間引きに使うサブメッシュ毎のテクスチャ解像度（null または 0 のサブメッシュは間引かない）
-        public Mesh Merge(Mesh cutMesh, List<int[]> parentTriangleIndexPerSubMesh, Mesh originalMesh, int protectedVertexCount,
-                          Vector2Int[] textureSizePerSubMesh = null)
+        public MeshArrays Merge(MeshArrays cutMesh, List<int[]> parentTriangleIndexPerSubMesh, MeshArrays originalMesh, int protectedVertexCount,
+                                Vector2Int[] textureSizePerSubMesh = null)
         {
-            int subMeshCount = cutMesh.subMeshCount;
+            int subMeshCount = cutMesh.SubMeshCount;
             int[][] triangles = new int[subMeshCount][];
             int[][] parents = new int[subMeshCount][];
             int[][] originalTriangles = new int[subMeshCount][];
@@ -60,7 +60,7 @@ namespace MeshDeletionTool
                 originalTriangles[subMeshIndex] = originalMesh.GetTriangles(subMeshIndex);
             }
 
-            int[][] mergedTriangles = MergeTriangles(cutMesh.vertices, cutMesh.uv, triangles, parents, originalMesh.vertices, originalTriangles,
+            int[][] mergedTriangles = MergeTriangles(cutMesh.Vertices, cutMesh.UV, triangles, parents, originalMesh.Vertices, originalTriangles,
                                                      protectedVertexCount, textureSizePerSubMesh, out int[][] mergedParents);
             ParentTriangleIndexPerSubMesh = new List<int[]>(mergedParents);
 
@@ -680,9 +680,9 @@ namespace MeshDeletionTool
         }
 
         // 参照されなくなった頂点を全ての頂点属性・ボーンウェイト・ブレンドシェイプから取り除いたメッシュを作る
-        private Mesh CompactMesh(Mesh cutMesh, int[][] mergedTriangles)
+        private MeshArrays CompactMesh(MeshArrays cutMesh, int[][] mergedTriangles)
         {
-            int vertexCount = cutMesh.vertexCount;
+            int vertexCount = cutMesh.VertexCount;
             VertexCountBefore = vertexCount;
             int[] newIndex = new int[vertexCount];
             for (int i = 0; i < vertexCount; i++)
@@ -706,82 +706,61 @@ namespace MeshDeletionTool
             }
             VertexCountAfter = newVertexCount;
 
-            Mesh mergedMesh = new Mesh();
-            mergedMesh.name = cutMesh.name;
-            mergedMesh.indexFormat = newVertexCount > 65535 ? UnityEngine.Rendering.IndexFormat.UInt32 : cutMesh.indexFormat;
-            mergedMesh.SetVertices(Compact(cutMesh.vertices, newIndex, newVertexCount));
-            List<Vector3> normals = Compact(cutMesh.normals, newIndex, newVertexCount);
-            if (normals != null) mergedMesh.SetNormals(normals);
-            List<Vector4> tangents = Compact(cutMesh.tangents, newIndex, newVertexCount);
-            if (tangents != null) mergedMesh.SetTangents(tangents);
-            List<Vector2> uv = Compact(cutMesh.uv, newIndex, newVertexCount);
-            if (uv != null) mergedMesh.SetUVs(0, uv);
-            List<Vector2> uv2 = Compact(cutMesh.uv2, newIndex, newVertexCount);
-            if (uv2 != null) mergedMesh.SetUVs(1, uv2);
-            List<Vector2> uv3 = Compact(cutMesh.uv3, newIndex, newVertexCount);
-            if (uv3 != null) mergedMesh.SetUVs(2, uv3);
-            List<Vector2> uv4 = Compact(cutMesh.uv4, newIndex, newVertexCount);
-            if (uv4 != null) mergedMesh.SetUVs(3, uv4);
-            List<Vector2> uv5 = Compact(cutMesh.uv5, newIndex, newVertexCount);
-            if (uv5 != null) mergedMesh.SetUVs(4, uv5);
-            List<Vector2> uv6 = Compact(cutMesh.uv6, newIndex, newVertexCount);
-            if (uv6 != null) mergedMesh.SetUVs(5, uv6);
-            List<Vector2> uv7 = Compact(cutMesh.uv7, newIndex, newVertexCount);
-            if (uv7 != null) mergedMesh.SetUVs(6, uv7);
-            List<Vector2> uv8 = Compact(cutMesh.uv8, newIndex, newVertexCount);
-            if (uv8 != null) mergedMesh.SetUVs(7, uv8);
-            List<Color> colors = Compact(cutMesh.colors, newIndex, newVertexCount);
-            if (colors != null) mergedMesh.SetColors(colors);
-            List<BoneWeight> boneWeights = Compact(cutMesh.boneWeights, newIndex, newVertexCount);
-            if (boneWeights != null) mergedMesh.boneWeights = boneWeights.ToArray();
-            mergedMesh.bindposes = cutMesh.bindposes;
+            // 出力メッシュ（インデックス形式は元のまま。頂点数が 65,535 を超えれば Mesh 作成時に 32 ビットになる）
+            MeshArrays mergedMesh = new MeshArrays();
+            mergedMesh.Name = cutMesh.Name;
+            mergedMesh.IndexFormat = cutMesh.IndexFormat;
+            mergedMesh.Vertices = Compact(cutMesh.Vertices, newIndex, newVertexCount);
+            mergedMesh.Normals = Compact(cutMesh.Normals, newIndex, newVertexCount);
+            mergedMesh.Tangents = Compact(cutMesh.Tangents, newIndex, newVertexCount);
+            for (int channel = 0; channel < MeshArrays.UVChannelCount; channel++)
+            {
+                mergedMesh.SetUV(channel, Compact(cutMesh.GetUV(channel), newIndex, newVertexCount));
+            }
+            mergedMesh.Colors = Compact(cutMesh.Colors, newIndex, newVertexCount);
+            mergedMesh.BoneWeights = Compact(cutMesh.BoneWeights, newIndex, newVertexCount);
+            mergedMesh.Bindposes = cutMesh.Bindposes;
 
-            mergedMesh.subMeshCount = mergedTriangles.Length;
+            mergedMesh.SubMeshTriangles = new int[mergedTriangles.Length][];
             for (int subMeshIndex = 0; subMeshIndex < mergedTriangles.Length; subMeshIndex++)
             {
                 int[] triangles = mergedTriangles[subMeshIndex];
-                List<int> remapped = new List<int>(triangles.Length);
-                foreach (int vertex in triangles)
+                int[] remapped = new int[triangles.Length];
+                for (int i = 0; i < triangles.Length; i++)
                 {
-                    remapped.Add(newIndex[vertex]);
+                    remapped[i] = newIndex[triangles[i]];
                 }
-                mergedMesh.SetTriangles(remapped, subMeshIndex);
+                mergedMesh.SubMeshTriangles[subMeshIndex] = remapped;
             }
 
             // ブレンドシェイプ（頂点を取り除くだけで差分は変えない）
-            for (int i = 0; i < cutMesh.blendShapeCount; i++)
+            foreach (BlendShapeData shape in cutMesh.BlendShapes)
             {
-                string blendShapeName = cutMesh.GetBlendShapeName(i);
-                int frameCount = cutMesh.GetBlendShapeFrameCount(i);
-                for (int j = 0; j < frameCount; j++)
+                BlendShapeData newShape = new BlendShapeData { Name = shape.Name };
+                foreach (BlendShapeFrameData frame in shape.Frames)
                 {
-                    float frameWeight = cutMesh.GetBlendShapeFrameWeight(i, j);
-                    Vector3[] deltaVertices = new Vector3[vertexCount];
-                    Vector3[] deltaNormals = new Vector3[vertexCount];
-                    Vector3[] deltaTangents = new Vector3[vertexCount];
-                    cutMesh.GetBlendShapeFrameVertices(i, j, deltaVertices, deltaNormals, deltaTangents);
-                    mergedMesh.AddBlendShapeFrame(blendShapeName, frameWeight,
-                                                  Compact(deltaVertices, newIndex, newVertexCount).ToArray(),
-                                                  Compact(deltaNormals, newIndex, newVertexCount).ToArray(),
-                                                  Compact(deltaTangents, newIndex, newVertexCount).ToArray());
+                    newShape.Frames.Add(new BlendShapeFrameData
+                    {
+                        Weight = frame.Weight,
+                        DeltaVertices = Compact(frame.DeltaVertices, newIndex, newVertexCount),
+                        DeltaNormals = Compact(frame.DeltaNormals, newIndex, newVertexCount),
+                        DeltaTangents = Compact(frame.DeltaTangents, newIndex, newVertexCount)
+                    });
                 }
+                mergedMesh.BlendShapes.Add(newShape);
             }
-            mergedMesh.bounds = cutMesh.bounds;
+            mergedMesh.Bounds = cutMesh.Bounds;
             return mergedMesh;
         }
 
-        // 頂点属性の配列を新しい頂点番号で詰める（属性が無い = 長さが頂点数と異なる場合は null）
-        private static List<T> Compact<T>(T[] source, int[] newIndex, int newVertexCount)
+        // 頂点属性の配列を新しい頂点番号で詰める（属性が無い = 長さが頂点数と異なる場合は空の配列）
+        private static T[] Compact<T>(T[] source, int[] newIndex, int newVertexCount)
         {
             if (source == null || source.Length != newIndex.Length)
             {
-                return null;
+                return new T[0];
             }
-            List<T> result = new List<T>(newVertexCount);
-            for (int i = 0; i < newVertexCount; i++)
-            {
-                result.Add(default(T));
-            }
+            T[] result = new T[newVertexCount];
             for (int i = 0; i < source.Length; i++)
             {
                 if (newIndex[i] >= 0)

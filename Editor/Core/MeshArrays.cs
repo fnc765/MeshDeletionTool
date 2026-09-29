@@ -125,6 +125,16 @@ namespace MeshDeletionTool
             }
         }
 
+        // 頂点カラーを Mesh に書き込んだときと同じ 8 ビットの値に丸める
+        // （Mesh の頂点カラーは 8 ビットで保存されるため、Mesh を経由していた従来の処理では各段階の出力がこの精度になっていた）
+        public void QuantizeColors()
+        {
+            for (int i = 0; i < Colors.Length; i++)
+            {
+                Colors[i] = (Color)(Color32)Colors[i];
+            }
+        }
+
         // 頂点の座標から境界ボックスを計算する（Mesh.RecalculateBounds 相当）
         public Bounds CalculateBounds()
         {

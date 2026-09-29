@@ -215,6 +215,7 @@ namespace MeshDeletionTool
 
             // 全サブメッシュの頂点が出揃ってから頂点属性と三角形を設定する
             newMeshData.CopyTo(newMesh);
+            newMesh.QuantizeColors();   // Mesh と同じ 8 ビット精度にする
             newMesh.SubMeshTriangles = new int[subMeshCount][];
             for (int subMeshIndex = 0; subMeshIndex < subMeshCount; subMeshIndex++)
             {

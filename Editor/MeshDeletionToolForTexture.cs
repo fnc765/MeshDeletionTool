@@ -255,6 +255,8 @@ namespace MeshDeletionTool
         }
 
         // テクスチャの透明部分に基づいてメッシュを削除するメソッド
+        // Mesh とテクスチャの読み出し、結果の保存だけをここで行い、処理本体（細分化・判定・切断・再結合）は Unity に依存しない
+        // AlphaMeshDeletionPipeline が MeshArrays / AlphaMask に対して行う
         private void DeleteMeshesFromTexture()
         {
             // 入力の検証
@@ -267,37 +269,33 @@ namespace MeshDeletionTool
             if (originalMesh == null)
                 return;
             WarnIfBonesPerVertexExceedFour(originalMesh);
-            Mesh sourceMesh = originalMesh;   // 細分化前の元のメッシュ
 
-            // 境界の細分化（削除処理の前に、アルファ境界付近の三角形を細分化したメッシュに置き換える）
-            List<int[]> refinedTriangleParents = null;   // 細分化後の三角形番号 → 元の三角形番号
+            // テクスチャのアルファ値とメッシュの頂点属性を一度だけ読み出す
+            bool[] targetSubMeshes = GetTargetSubMeshes(originalMesh.subMeshCount);
             if (refineBoundary && refineMaxDepth > 0)
             {
-                originalMesh = RefineMeshAroundAlphaBoundary(originalMesh, originalMaterials, out refinedTriangleParents);
+                MakeTargetTexturesReadable(originalMesh.subMeshCount, originalMaterials, targetSubMeshes);
             }
-
-            // テクスチャのアルファ値とメッシュの頂点属性を一度だけ読み出し、以後の処理は Unity に依存しない配列に対して行う
             AlphaMask[] subMeshMasks = CollectAlphaMasks(originalMesh.subMeshCount, originalMaterials);
-            bool[] targetSubMeshes = GetTargetSubMeshes(originalMesh.subMeshCount);
-            MeshArrays originalArrays = MeshArraysUnityAdapter.FromMesh(originalMesh);
-            AlphaMeshCutter cutter = new AlphaMeshCutter { AlphaThreshold = alphaThreshold };
+            MeshArrays sourceArrays = MeshArraysUnityAdapter.FromMesh(originalMesh);
 
-            // 削除すべき頂点のインデックスを取得
-            List<int> removeVerticesIndexs = cutter.GetVerticesToRemove(originalArrays, subMeshMasks);
-            // 新しいメッシュを作成
-            MeshArrays cutArrays = cutter.Cut(originalArrays, subMeshMasks, targetSubMeshes, removeVerticesIndexs, out List<int[]> sourceTriangleIndices);
-            Mesh newMesh = MeshArraysUnityAdapter.ToMesh(cutArrays);
-            // 出力三角形 → 元の三角形の対応を保持する
-            lastOutputTriangleParents = ComposeTriangleParents(sourceTriangleIndices, refinedTriangleParents);
-
-            // 切断後の再結合（細分化で増えた三角形を元の三角形ごとに結合し直す）
-            if (refinedTriangleParents != null && mergeCutPolygons)
+            // 細分化 → 削除する頂点の判定 → 切断 → 再結合
+            AlphaMeshDeletionPipeline pipeline = new AlphaMeshDeletionPipeline
             {
-                // 出力メッシュの先頭には元のメッシュの頂点（削除されなかったもの）が並ぶ。これらは再結合で取り除かない
-                int keptOriginalVertexCount = sourceMesh.vertexCount - removeVerticesIndexs.Count(index => index < sourceMesh.vertexCount);
-                newMesh = MergeCutPolygons(newMesh, sourceMesh, originalMaterials, keptOriginalVertexCount);
-            }
-            // 新しいメッシュを保存
+                AlphaThreshold = alphaThreshold,
+                RefineBoundary = refineBoundary,
+                RefineMaxDepth = refineMaxDepth,
+                RefinePartiallyCutTriangles = refinePartiallyCutTriangles,
+                RefineChordToleranceTexels = refineChordToleranceTexels,
+                MergeCutPolygons = mergeCutPolygons,
+                SimplifyToleranceTexels = simplifyToleranceTexels,
+                Log = Debug.Log
+            };
+            MeshArrays newArrays = pipeline.Run(sourceArrays, subMeshMasks, targetSubMeshes);
+            lastOutputTriangleParents = pipeline.OutputTriangleParents;
+
+            // 新しいメッシュを作成して保存
+            Mesh newMesh = MeshArraysUnityAdapter.ToMesh(newArrays);
             SaveNewMesh(newMesh);
         }
 
@@ -310,6 +308,21 @@ namespace MeshDeletionTool
                 targets[subMeshIndex] = subMeshVisibility.TryGetValue(subMeshIndex, out bool isTarget) && isTarget;
             }
             return targets;
+        }
+
+        // 処理対象サブメッシュのテクスチャの読み取りを有効化する（境界の細分化が行う判定のため）
+        private void MakeTargetTexturesReadable(int subMeshCount, Material[] originalMaterials, bool[] targetSubMeshes)
+        {
+            for (int subMeshIndex = 0; subMeshIndex < subMeshCount; subMeshIndex++)
+            {
+                if (!targetSubMeshes[subMeshIndex])
+                    continue;
+                Material material = originalMaterials[subMeshIndex];
+                Texture2D texture = material != null ? material.mainTexture as Texture2D : null;
+                if (texture == null)
+                    continue;
+                MakeTextureReadable(texture);   //テクスチャ読み取り有効化
+            }
         }
 
         // メッシュに使用されているテクスチャ読み取りの有効化と、サブメッシュ毎のテクスチャのアルファ値の読み出し
@@ -344,130 +357,6 @@ namespace MeshDeletionTool
                 return false;
             }
             return true;
-        }
-
-        // 切断後のメッシュを元の三角形ごとに再結合したメッシュを返すメソッド
-        private Mesh MergeCutPolygons(Mesh cutMesh, Mesh sourceMesh, Material[] originalMaterials, int keptOriginalVertexCount)
-        {
-            // 切り口の間引きは処理対象のサブメッシュのテクスチャ解像度に対するテクセル単位で行う
-            Vector2Int[] textureSizes = GetTextureSizes(sourceMesh.subMeshCount, originalMaterials);
-            for (int subMeshIndex = 0; subMeshIndex < textureSizes.Length; subMeshIndex++)
-            {
-                if (!subMeshVisibility.TryGetValue(subMeshIndex, out bool isTarget) || !isTarget)
-                    textureSizes[subMeshIndex] = Vector2Int.zero;
-            }
-            CutPolygonMerger merger = new CutPolygonMerger { SimplifyToleranceTexels = simplifyToleranceTexels };
-            Mesh mergedMesh = merger.Merge(cutMesh, lastOutputTriangleParents, sourceMesh, keptOriginalVertexCount, textureSizes);
-            lastOutputTriangleParents = merger.ParentTriangleIndexPerSubMesh;
-            Debug.Log("切断後の再結合: 三角形 " + merger.TriangleCountBefore + " → " + merger.TriangleCountAfter +
-                      ", 頂点 " + merger.VertexCountBefore + " → " + merger.VertexCountAfter +
-                      " (一直線上の頂点の削除 " + merger.RemovedFlatVertexCount + ", 切り口の間引き " + merger.RemovedChainVertexCount +
-                      ", 再結合できなかった三角形 " + merger.FallbackCount + ": 穴 " + merger.FallbackHoleCount +
-                      ", 非多様体 " + merger.FallbackNonManifoldCount + ", 分割失敗 " + merger.FallbackTriangulationCount + ")");
-            return mergedMesh;
-        }
-
-        // 出力三角形 → 入力三角形の対応と、入力（細分化後）三角形 → 元の三角形の対応を合成する（細分化していなければそのまま）
-        private static List<int[]> ComposeTriangleParents(List<int[]> sourceTriangleIndices, List<int[]> refinedTriangleParents)
-        {
-            if (refinedTriangleParents == null)
-            {
-                return sourceTriangleIndices;
-            }
-            List<int[]> parents = new List<int[]>(sourceTriangleIndices.Count);
-            for (int subMeshIndex = 0; subMeshIndex < sourceTriangleIndices.Count; subMeshIndex++)
-            {
-                int[] sources = sourceTriangleIndices[subMeshIndex];
-                int[] composed = new int[sources.Length];
-                for (int i = 0; i < sources.Length; i++)
-                {
-                    composed[i] = refinedTriangleParents[subMeshIndex][sources[i]];
-                }
-                parents.Add(composed);
-            }
-            return parents;
-        }
-
-        // アルファ境界付近の三角形を細分化したメッシュを返すメソッド（処理対象のサブメッシュのみ判定する）
-        // parentTriangleIndexPerSubMesh には細分化後の三角形番号 → 元の三角形番号の対応を返す
-        private Mesh RefineMeshAroundAlphaBoundary(Mesh originalMesh, Material[] originalMaterials, out List<int[]> parentTriangleIndexPerSubMesh)
-        {
-            // 処理対象サブメッシュのテクスチャを集める（対象外は null）
-            Texture2D[] subMeshTextures = new Texture2D[originalMesh.subMeshCount];
-            for (int subMeshIndex = 0; subMeshIndex < originalMesh.subMeshCount; subMeshIndex++)
-            {
-                if (!subMeshVisibility.TryGetValue(subMeshIndex, out bool isTarget) || !isTarget)
-                    continue;
-                Material material = originalMaterials[subMeshIndex];
-                Texture2D texture = material != null ? material.mainTexture as Texture2D : null;
-                if (texture == null)
-                    continue;
-                MakeTextureReadable(texture);   //テクスチャ読み取り有効化
-                subMeshTextures[subMeshIndex] = texture;
-            }
-
-            AlphaBoundaryRefiner refiner = new AlphaBoundaryRefiner
-            {
-                MaxDepth = refineMaxDepth,
-                RefinePartiallyCutTriangles = refinePartiallyCutTriangles,
-                ChordToleranceTexels = refineChordToleranceTexels
-            };
-            Mesh refinedMesh = refiner.Refine(originalMesh, subMeshTextures, alphaThreshold);
-            parentTriangleIndexPerSubMesh = refiner.ParentTriangleIndexPerSubMesh;
-            Debug.Log("境界の細分化: 三角形 " + originalMesh.triangles.Length / 3 + " → " + refinedMesh.triangles.Length / 3 +
-                      " (深さ毎の三角形数: " + string.Join(", ", refiner.TriangleCountPerDepth) + ")");
-            return refinedMesh;
-        }
-
-        // UV座標が示すテクスチャのピクセルが境界エッジかどうかを判定する関数（細分化処理と共用）
-        internal static bool IsBoundaryEdge(Texture2D texture, Vector2 uv1, Vector2 uv2, float alphaThreshold)
-        {
-            // UV座標をピクセル座標に変換
-            Vector2 pixelUV1 = new Vector2(uv1.x * (texture.width - 1), uv1.y * (texture.height - 1));
-            Vector2 pixelUV2 = new Vector2(uv2.x * (texture.width - 1), uv2.y * (texture.height - 1));
-
-            // 両端点のピクセルの色を取得
-            Color color1 = texture.GetPixel((int)pixelUV1.x, (int)pixelUV1.y);
-            Color color2 = texture.GetPixel((int)pixelUV2.x, (int)pixelUV2.y);
-
-            // 片方のピクセルが透明で、もう片方が透明でない場合は境界エッジとする
-            return (color1.a < alphaThreshold && color2.a > alphaThreshold) || (color1.a > alphaThreshold && color2.a < alphaThreshold);
-        }
-
-        // テクスチャのアルファ値に基づき、エッジ上の境界点のUV座標の補完用重みを求める（細分化処理と共用）
-        internal static float FindAlphaBoundary(Texture2D texture, Vector2 uv1, Vector2 uv2, float alphaThreshold)
-        {
-            // UV座標をピクセル座標に変換し、開始点の色を取得
-            Vector2 pixelUV1 = new Vector2(uv1.x * (texture.width - 1), uv1.y * (texture.height - 1));
-            Color color1 = texture.GetPixel((int)pixelUV1.x, (int)pixelUV1.y);
-
-            float tMin = 0.0f;
-            float tMax = 1.0f;
-            
-            // 二分探索を用いて境界点を探す
-            for (int i = 0; i < 10; i++)
-            {
-                float t = (tMin + tMax) / 2.0f;  // 中間点の係数
-                // UV座標と頂点座標の中間点を計算
-                Vector2 midUV = Vector2.Lerp(uv1, uv2, t);
-                Vector2 midPixelUV = new Vector2(midUV.x * (texture.width - 1), midUV.y * (texture.height - 1));
-                Color midColor = texture.GetPixel((int)midPixelUV.x, (int)midPixelUV.y);
-
-                // 境界条件に応じて探索範囲を狭める
-                if ((color1.a < alphaThreshold && midColor.a > alphaThreshold) || (color1.a > alphaThreshold && midColor.a < alphaThreshold))
-                {
-                    tMax = t; // 境界があると考えられる範囲を左側に絞り込む
-                }
-                else
-                {
-                    tMin = t; // 境界があると考えられる範囲を右側に絞り込む
-                    color1 = midColor;
-                }
-            }
-
-            // 最終的な境界点のUV座標と頂点座標を計算して返す
-            float weight = (tMin + tMax) / 2.0f;
-            return weight;
         }
     }
 }

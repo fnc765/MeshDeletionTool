@@ -37,34 +37,34 @@ namespace MeshDeletionTool
         public List<int[]> ParentTriangleIndexPerSubMesh = new List<int[]>();
 
         // アルファ境界付近の三角形を細分化したメッシュを返す
-        // subMeshTextures[i] が null のサブメッシュは判定対象外（隣接する辺の分割にのみ追従する）
+        // subMeshMasks[i] が null のサブメッシュは判定対象外（隣接する辺の分割にのみ追従する）
         // 細分化が不要な場合は元のメッシュをそのまま返す
-        public Mesh Refine(Mesh mesh, Texture2D[] subMeshTextures, float alphaThreshold)
+        public MeshArrays Refine(MeshArrays mesh, AlphaMask[] subMeshMasks, float alphaThreshold)
         {
             TriangleCountPerDepth.Clear();
             MarkedTriangleCountPerDepth.Clear();
             ParentTriangleIndexPerSubMesh = CreateIdentityParents(mesh);
 
-            Mesh currentMesh = mesh;
+            MeshArrays currentMesh = mesh;
             for (int depth = 0; depth < MaxDepth; depth++)
             {
-                HashSet<(int, int)> splitEdges = CollectEdgesToSplit(currentMesh, subMeshTextures, alphaThreshold, out int markedCount);
+                HashSet<(int, int)> splitEdges = CollectEdgesToSplit(currentMesh, subMeshMasks, alphaThreshold, out int markedCount);
                 if (splitEdges.Count == 0)
                 {
                     break;
                 }
                 currentMesh = SplitEdges(currentMesh, splitEdges, ParentTriangleIndexPerSubMesh, out ParentTriangleIndexPerSubMesh);
                 MarkedTriangleCountPerDepth.Add(markedCount);
-                TriangleCountPerDepth.Add(currentMesh.triangles.Length / 3);
+                TriangleCountPerDepth.Add(currentMesh.TriangleCount);
             }
             return currentMesh;
         }
 
         // 各サブメッシュの三角形番号をそのまま親とする対応表を作る
-        private static List<int[]> CreateIdentityParents(Mesh mesh)
+        private static List<int[]> CreateIdentityParents(MeshArrays mesh)
         {
-            List<int[]> parents = new List<int[]>(mesh.subMeshCount);
-            for (int subMeshIndex = 0; subMeshIndex < mesh.subMeshCount; subMeshIndex++)
+            List<int[]> parents = new List<int[]>(mesh.SubMeshCount);
+            for (int subMeshIndex = 0; subMeshIndex < mesh.SubMeshCount; subMeshIndex++)
             {
                 int[] identity = new int[mesh.GetTriangles(subMeshIndex).Length / 3];
                 for (int i = 0; i < identity.Length; i++)
@@ -77,16 +77,16 @@ namespace MeshDeletionTool
         }
 
         // 細分化対象の三角形を判定し、分割する辺（頂点インデックスの昇順ペア）の集合を返す
-        private HashSet<(int, int)> CollectEdgesToSplit(Mesh mesh, Texture2D[] subMeshTextures, float alphaThreshold, out int markedCount)
+        private HashSet<(int, int)> CollectEdgesToSplit(MeshArrays mesh, AlphaMask[] subMeshMasks, float alphaThreshold, out int markedCount)
         {
             HashSet<(int, int)> splitEdges = new HashSet<(int, int)>();
             markedCount = 0;
-            Vector2[] uvs = mesh.uv;
+            Vector2[] uvs = mesh.UV;
 
-            for (int subMeshIndex = 0; subMeshIndex < mesh.subMeshCount; subMeshIndex++)
+            for (int subMeshIndex = 0; subMeshIndex < mesh.SubMeshCount; subMeshIndex++)
             {
-                Texture2D texture = subMeshIndex < subMeshTextures.Length ? subMeshTextures[subMeshIndex] : null;
-                if (texture == null)
+                AlphaMask mask = subMeshIndex < subMeshMasks.Length ? subMeshMasks[subMeshIndex] : null;
+                if (mask == null)
                 {
                     continue;
                 }
@@ -94,7 +94,7 @@ namespace MeshDeletionTool
                 int[] triangles = mesh.GetTriangles(subMeshIndex);
                 for (int i = 0; i < triangles.Length; i += 3)
                 {
-                    if (ShouldSubdivide(texture, uvs, triangles[i], triangles[i + 1], triangles[i + 2], alphaThreshold))
+                    if (ShouldSubdivide(mask, uvs, triangles[i], triangles[i + 1], triangles[i + 2], alphaThreshold))
                     {
                         markedCount++;
                         splitEdges.Add(MakeEdgeKey(triangles[i], triangles[i + 1]));
@@ -107,28 +107,28 @@ namespace MeshDeletionTool
         }
 
         // 三角形を細分化すべきか判定する
-        private bool ShouldSubdivide(Texture2D texture, Vector2[] uvs, int indexA, int indexB, int indexC, float alphaThreshold)
+        private bool ShouldSubdivide(AlphaMask mask, Vector2[] uvs, int indexA, int indexB, int indexC, float alphaThreshold)
         {
             Vector2[] uv = { uvs[indexA], uvs[indexB], uvs[indexC] };
 
             // 最長辺が1テクセル未満の三角形はこれ以上細分化しない（終了保証）
-            if (LongestEdgeInTexels(texture, uv) < 1f)
+            if (LongestEdgeInTexels(mask, uv) < 1f)
             {
                 return false;
             }
 
             bool[] transparent =
             {
-                IsTransparent(texture, uv[0], alphaThreshold),
-                IsTransparent(texture, uv[1], alphaThreshold),
-                IsTransparent(texture, uv[2], alphaThreshold)
+                AlphaSampling.IsTransparent(mask, uv[0], alphaThreshold),
+                AlphaSampling.IsTransparent(mask, uv[1], alphaThreshold),
+                AlphaSampling.IsTransparent(mask, uv[2], alphaThreshold)
             };
             int transparentCount = (transparent[0] ? 1 : 0) + (transparent[1] ? 1 : 0) + (transparent[2] ? 1 : 0);
 
             // 3頂点とも透明: 内部に不透明テクセルがあれば細分化する（修正1）
             if (transparentCount == 3)
             {
-                return RefineFullyTransparentTriangles && CountOpaqueTexels(texture, uv, alphaThreshold, 1) > 0;
+                return RefineFullyTransparentTriangles && CountOpaqueTexels(mask, uv, alphaThreshold, 1) > 0;
             }
             // 3頂点とも不透明: 既存処理でそのまま残るため対象外
             if (transparentCount == 0)
@@ -141,12 +141,12 @@ namespace MeshDeletionTool
                 return false;
             }
             int[] index = { indexA, indexB, indexC };
-            List<Vector2> removedPolygon = BuildRemovedPolygon(texture, uv, index, transparent, alphaThreshold);
-            return CountOpaqueTexels(texture, removedPolygon, alphaThreshold, ChordToleranceTexels + 1) > ChordToleranceTexels;
+            List<Vector2> removedPolygon = BuildRemovedPolygon(mask, uv, index, transparent, alphaThreshold);
+            return CountOpaqueTexels(mask, removedPolygon, alphaThreshold, ChordToleranceTexels + 1) > ChordToleranceTexels;
         }
 
         // 既存処理と同じ境界点（辺上の二分探索）を使い、三角形のうち削除される側の多角形（UV座標、外周順）を作る
-        private static List<Vector2> BuildRemovedPolygon(Texture2D texture, Vector2[] uv, int[] index, bool[] transparent, float alphaThreshold)
+        private static List<Vector2> BuildRemovedPolygon(AlphaMask mask, Vector2[] uv, int[] index, bool[] transparent, float alphaThreshold)
         {
             List<Vector2> polygon = new List<Vector2>(4);
             for (int i = 0; i < 3; i++)
@@ -156,35 +156,21 @@ namespace MeshDeletionTool
                 {
                     polygon.Add(uv[i]);
                 }
-                if (MeshDeletionToolForTexture.IsBoundaryEdge(texture, uv[i], uv[j], alphaThreshold))
+                if (AlphaSampling.IsBoundaryEdge(mask, uv[i], uv[j], alphaThreshold))
                 {
                     // 辺の向きも既存処理と同じ（頂点インデックスの昇順）にして同一の境界点を得る
                     (Vector2 uvA, Vector2 uvB) = index[i] < index[j] ? (uv[i], uv[j]) : (uv[j], uv[i]);
-                    float weight = MeshDeletionToolForTexture.FindAlphaBoundary(texture, uvA, uvB, alphaThreshold);
+                    float weight = AlphaSampling.FindAlphaBoundary(mask, uvA, uvB, alphaThreshold);
                     polygon.Add(Vector2.Lerp(uvA, uvB, weight));
                 }
             }
             return polygon;
         }
 
-        // UV座標が示すテクセルのアルファ値を取得する（既存処理と同じテクセル座標の求め方）
-        private static float SampleAlpha(Texture2D texture, Vector2 uv)
-        {
-            int x = (int)(uv.x * (texture.width - 1));
-            int y = (int)(uv.y * (texture.height - 1));
-            return texture.GetPixel(x, y).a;
-        }
-
-        // UV座標が示すテクセルが透明（削除対象）かどうか
-        private static bool IsTransparent(Texture2D texture, Vector2 uv, float alphaThreshold)
-        {
-            return SampleAlpha(texture, uv) < alphaThreshold;
-        }
-
         // 三角形の最長辺の長さ（テクセル単位）
-        private static float LongestEdgeInTexels(Texture2D texture, Vector2[] uv)
+        private static float LongestEdgeInTexels(AlphaMask mask, Vector2[] uv)
         {
-            Vector2 scale = new Vector2(texture.width - 1, texture.height - 1);
+            Vector2 scale = new Vector2(mask.Width - 1, mask.Height - 1);
             float longest = 0f;
             for (int i = 0; i < 3; i++)
             {
@@ -195,15 +181,15 @@ namespace MeshDeletionTool
         }
 
         // 凸多角形（UV座標）の内部にある不透明テクセルの数を数える（stopAt に達したら打ち切る）
-        private int CountOpaqueTexels(Texture2D texture, IList<Vector2> polygon, float alphaThreshold, int stopAt)
+        private int CountOpaqueTexels(AlphaMask mask, IList<Vector2> polygon, float alphaThreshold, int stopAt)
         {
             if (polygon.Count < 3)
             {
                 return 0;
             }
 
-            int width = texture.width;
-            int height = texture.height;
+            int width = mask.Width;
+            int height = mask.Height;
 
             // 既存処理と同じテクセル座標系 (x = u * (w - 1), y = v * (h - 1)) に変換し、バウンディングボックスを求める
             Vector2[] points = new Vector2[polygon.Count];
@@ -250,7 +236,7 @@ namespace MeshDeletionTool
                     {
                         continue;
                     }
-                    if (texture.GetPixel(x, y).a >= alphaThreshold)
+                    if (mask.Alpha(x, y) >= alphaThreshold)
                     {
                         count++;
                         if (count >= stopAt)
@@ -287,23 +273,23 @@ namespace MeshDeletionTool
 
         // 指定した辺の中点に頂点を追加し、全ての三角形を分割された辺に合わせて再構成したメッシュを返す
         // parents は入力メッシュの三角形番号 → 元の三角形番号で、出力メッシュに合わせた対応表を newParents に返す
-        private static Mesh SplitEdges(Mesh mesh, HashSet<(int, int)> splitEdges, List<int[]> parents, out List<int[]> newParents)
+        private static MeshArrays SplitEdges(MeshArrays mesh, HashSet<(int, int)> splitEdges, List<int[]> parents, out List<int[]> newParents)
         {
-            // 頂点属性を読み出す（Unity の Mesh プロパティは呼び出し毎に配列をコピーするため一度だけ読む）
-            int originalVertexCount = mesh.vertexCount;
-            List<Vector3> vertices = new List<Vector3>(mesh.vertices);
-            List<Vector3> normals = new List<Vector3>(mesh.normals);
-            List<Vector4> tangents = new List<Vector4>(mesh.tangents);
-            List<Vector2> uv = new List<Vector2>(mesh.uv);
-            List<Vector2> uv2 = new List<Vector2>(mesh.uv2);
-            List<Vector2> uv3 = new List<Vector2>(mesh.uv3);
-            List<Vector2> uv4 = new List<Vector2>(mesh.uv4);
-            List<Vector2> uv5 = new List<Vector2>(mesh.uv5);
-            List<Vector2> uv6 = new List<Vector2>(mesh.uv6);
-            List<Vector2> uv7 = new List<Vector2>(mesh.uv7);
-            List<Vector2> uv8 = new List<Vector2>(mesh.uv8);
-            List<Color> colors = new List<Color>(mesh.colors);
-            List<BoneWeight> boneWeights = new List<BoneWeight>(mesh.boneWeights);
+            // 頂点属性をリストに写す（中点頂点を末尾に追加する）
+            int originalVertexCount = mesh.VertexCount;
+            List<Vector3> vertices = new List<Vector3>(mesh.Vertices);
+            List<Vector3> normals = new List<Vector3>(mesh.Normals);
+            List<Vector4> tangents = new List<Vector4>(mesh.Tangents);
+            List<Vector2> uv = new List<Vector2>(mesh.UV);
+            List<Vector2> uv2 = new List<Vector2>(mesh.UV2);
+            List<Vector2> uv3 = new List<Vector2>(mesh.UV3);
+            List<Vector2> uv4 = new List<Vector2>(mesh.UV4);
+            List<Vector2> uv5 = new List<Vector2>(mesh.UV5);
+            List<Vector2> uv6 = new List<Vector2>(mesh.UV6);
+            List<Vector2> uv7 = new List<Vector2>(mesh.UV7);
+            List<Vector2> uv8 = new List<Vector2>(mesh.UV8);
+            List<Color> colors = new List<Color>(mesh.Colors);
+            List<BoneWeight> boneWeights = new List<BoneWeight>(mesh.BoneWeights);
 
             // 分割する辺ごとに中点頂点を1つ追加する（辺を共有する三角形・サブメッシュ間で共通）
             List<(int, int)> edges = new List<(int, int)>(splitEdges);
@@ -315,28 +301,30 @@ namespace MeshDeletionTool
                 AddMidpointVertex(indexA, indexB, vertices, normals, tangents, uv, uv2, uv3, uv4, uv5, uv6, uv7, uv8, colors, boneWeights);
             }
 
-            Mesh refinedMesh = new Mesh();
-            refinedMesh.name = mesh.name;
-            refinedMesh.indexFormat = vertices.Count > 65535 ? UnityEngine.Rendering.IndexFormat.UInt32 : mesh.indexFormat;
-            refinedMesh.SetVertices(vertices);
-            if (normals.Count > 0) refinedMesh.SetNormals(normals);
-            if (tangents.Count > 0) refinedMesh.SetTangents(tangents);
-            if (uv.Count > 0) refinedMesh.SetUVs(0, uv);
-            if (uv2.Count > 0) refinedMesh.SetUVs(1, uv2);
-            if (uv3.Count > 0) refinedMesh.SetUVs(2, uv3);
-            if (uv4.Count > 0) refinedMesh.SetUVs(3, uv4);
-            if (uv5.Count > 0) refinedMesh.SetUVs(4, uv5);
-            if (uv6.Count > 0) refinedMesh.SetUVs(5, uv6);
-            if (uv7.Count > 0) refinedMesh.SetUVs(6, uv7);
-            if (uv8.Count > 0) refinedMesh.SetUVs(7, uv8);
-            if (colors.Count > 0) refinedMesh.SetColors(colors);
-            if (boneWeights.Count > 0) refinedMesh.boneWeights = boneWeights.ToArray();
-            refinedMesh.bindposes = mesh.bindposes;
+            // 出力メッシュ（インデックス形式は元のまま。頂点数が 65,535 を超えれば Mesh 作成時に 32 ビットになる）
+            MeshArrays refinedMesh = new MeshArrays();
+            refinedMesh.Name = mesh.Name;
+            refinedMesh.IndexFormat = mesh.IndexFormat;
+            refinedMesh.Vertices = vertices.ToArray();
+            refinedMesh.Normals = normals.ToArray();
+            refinedMesh.Tangents = tangents.ToArray();
+            refinedMesh.UV = uv.ToArray();
+            refinedMesh.UV2 = uv2.ToArray();
+            refinedMesh.UV3 = uv3.ToArray();
+            refinedMesh.UV4 = uv4.ToArray();
+            refinedMesh.UV5 = uv5.ToArray();
+            refinedMesh.UV6 = uv6.ToArray();
+            refinedMesh.UV7 = uv7.ToArray();
+            refinedMesh.UV8 = uv8.ToArray();
+            refinedMesh.Colors = colors.ToArray();
+            refinedMesh.QuantizeColors();   // Mesh と同じ 8 ビット精度にする（次の深さの補間の入力になる）
+            refinedMesh.BoneWeights = boneWeights.ToArray();
+            refinedMesh.Bindposes = mesh.Bindposes;
 
             // 各サブメッシュの三角形を、分割された辺の数に応じて再構成する（巻き順は保たれる）
-            refinedMesh.subMeshCount = mesh.subMeshCount;
-            newParents = new List<int[]>(mesh.subMeshCount);
-            for (int subMeshIndex = 0; subMeshIndex < mesh.subMeshCount; subMeshIndex++)
+            refinedMesh.SubMeshTriangles = new int[mesh.SubMeshCount][];
+            newParents = new List<int[]>(mesh.SubMeshCount);
+            for (int subMeshIndex = 0; subMeshIndex < mesh.SubMeshCount; subMeshIndex++)
             {
                 int[] triangles = mesh.GetTriangles(subMeshIndex);
                 List<int> newTriangles = new List<int>(triangles.Length * 2);
@@ -350,10 +338,10 @@ namespace MeshDeletionTool
                         newTriangleParents.Add(parents[subMeshIndex][i / 3]);
                     }
                 }
-                refinedMesh.SetTriangles(newTriangles, subMeshIndex);
+                refinedMesh.SubMeshTriangles[subMeshIndex] = newTriangles.ToArray();
                 newParents.Add(newTriangleParents.ToArray());
             }
-            refinedMesh.bounds = mesh.bounds;
+            refinedMesh.Bounds = mesh.Bounds;
 
             CopyBlendShapes(mesh, refinedMesh, edges, originalVertexCount);
 
@@ -476,21 +464,17 @@ namespace MeshDeletionTool
         }
 
         // ブレンドシェイプを全フレームコピーし、中点頂点の差分を2頂点の差分の中間値で補完する
-        private static void CopyBlendShapes(Mesh sourceMesh, Mesh targetMesh, List<(int, int)> midpointEdges, int originalVertexCount)
+        private static void CopyBlendShapes(MeshArrays sourceMesh, MeshArrays targetMesh, List<(int, int)> midpointEdges, int originalVertexCount)
         {
             int newVertexCount = originalVertexCount + midpointEdges.Count;
-            for (int i = 0; i < sourceMesh.blendShapeCount; i++)
+            foreach (BlendShapeData shape in sourceMesh.BlendShapes)
             {
-                string blendShapeName = sourceMesh.GetBlendShapeName(i);
-                int frameCount = sourceMesh.GetBlendShapeFrameCount(i);
-                for (int j = 0; j < frameCount; j++)
+                BlendShapeData newShape = new BlendShapeData { Name = shape.Name };
+                foreach (BlendShapeFrameData frame in shape.Frames)
                 {
-                    float frameWeight = sourceMesh.GetBlendShapeFrameWeight(i, j);
-                    // 頂点数0のフレームも、GetBlendShapeFrameVertices は全頂点分の（ゼロの）差分を返す
-                    Vector3[] deltaVertices = new Vector3[originalVertexCount];
-                    Vector3[] deltaNormals = new Vector3[originalVertexCount];
-                    Vector3[] deltaTangents = new Vector3[originalVertexCount];
-                    sourceMesh.GetBlendShapeFrameVertices(i, j, deltaVertices, deltaNormals, deltaTangents);
+                    Vector3[] deltaVertices = frame.DeltaVertices;
+                    Vector3[] deltaNormals = frame.DeltaNormals;
+                    Vector3[] deltaTangents = frame.DeltaTangents;
 
                     Vector3[] newDeltaVertices = new Vector3[newVertexCount];
                     Vector3[] newDeltaNormals = new Vector3[newVertexCount];
@@ -506,8 +490,9 @@ namespace MeshDeletionTool
                         newDeltaNormals[newIndex] = Vector3.Lerp(deltaNormals[indexA], deltaNormals[indexB], 0.5f);
                         newDeltaTangents[newIndex] = Vector3.Lerp(deltaTangents[indexA], deltaTangents[indexB], 0.5f);
                     }
-                    targetMesh.AddBlendShapeFrame(blendShapeName, frameWeight, newDeltaVertices, newDeltaNormals, newDeltaTangents);
+                    newShape.Frames.Add(new BlendShapeFrameData { Weight = frame.Weight, DeltaVertices = newDeltaVertices, DeltaNormals = newDeltaNormals, DeltaTangents = newDeltaTangents });
                 }
+                targetMesh.BlendShapes.Add(newShape);
             }
         }
     }

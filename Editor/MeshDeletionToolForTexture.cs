@@ -354,7 +354,7 @@ namespace MeshDeletionTool
                                 addNonDeletableVertexToPolygon(originalMesh, oldToNewIndexMap, triangleIndexs);         
 
                             // 辺上の新規頂点座標と、シェイプキー用補完重みを計算
-                            (MeshData addMeshData, List<(int, int, float)> localVertexInterpolation) =
+                            (MeshData addMeshData, List<(int, int, float)> localVertexInterpolation, List<int> crossedSides) =
                                 addNewVertexToEdge(originalMesh, texture, triangleIndexs);
 
                             // 追加頂点の中で重複が無いように全体メッシュへ頂点を追加する（既存頂点はシームなどで重複がある）
@@ -362,15 +362,20 @@ namespace MeshDeletionTool
                             addUniqueMeshData(addMeshData, newMeshData, polygonToGlobalIndexMap, edgeVertexIndexMap,
                                             localVertexInterpolation, vertexInterpolation);
 
-                            // 処理対象の多角形の外形頂点としてまとめる
+                            // 処理対象の多角形の外形頂点としてまとめる（残す頂点、辺上の新規頂点の順）
                             List<Vector3> polygonVertices = new List<Vector3>();
                             polygonVertices.AddRange(originVertices);
                             polygonVertices.AddRange(addMeshData.Vertices);
 
+                            // 多角形頂点を三角形の外周順（元の巻き順）に並べ替える
+                            List<int> outline = createPolygonOutline(triangleIndexs, crossedSides);
+                            List<Vector3> outlineVertices = outline.Select(k => polygonVertices[k]).ToList();
+                            List<int> outlineToGlobalIndexMap = outline.Select(k => polygonToGlobalIndexMap[k]).ToList();
+
                             // 多角形頂点から三角ポリゴンに変換し頂点インデックス配列を返す
-                            int[] triangulatedIndices = createTriangleFromPolygon(originalMesh, triangleIndexs, polygonVertices);
+                            int[] triangulatedIndices = createTriangleFromPolygon(originalMesh, triangleIndexs, outlineVertices);
                             // 三角ポリゴンの頂点インデックス配列を全体頂点インデックスに変換する
-                            List<int> polygonTriangles = convertIndexToGlobal(triangulatedIndices, polygonToGlobalIndexMap);
+                            List<int> polygonTriangles = convertIndexToGlobal(triangulatedIndices, outlineToGlobalIndexMap);
                             // サブメッシュの三角ポリゴン配列に追加
                             newSubMeshTriangles.AddRange(polygonTriangles);
                         }
@@ -439,12 +444,13 @@ namespace MeshDeletionTool
             return (originVertices, polygonToGlobalIndexMap);
         }
 
-        // 辺への新規頂点追加
-        private (MeshData, List<(int, int, float)>) addNewVertexToEdge(Mesh originalMesh, Texture2D texture,
-                                                                       List<(int index, bool isRemoved)> triangleIndexs)
+        // 辺への新規頂点追加（境界点が見つかった辺の番号 0〜2 も返す）
+        private (MeshData, List<(int, int, float)>, List<int>) addNewVertexToEdge(Mesh originalMesh, Texture2D texture,
+                                                                                  List<(int index, bool isRemoved)> triangleIndexs)
         {
             MeshData addMeshData = new MeshData();
             List<(int, int, float)> localVertexInterpolation = new List<(int, int, float)>();
+            List<int> crossedSides = new List<int>();
 
             if (texture != null)
             {
@@ -463,10 +469,11 @@ namespace MeshDeletionTool
                         // ２つの頂点（インデックス昇順）と重みを保存
                         localVertexInterpolation.Add(interpolation);
                         addMeshData.Add(newMeshDataVertex); //多角形頂点に追加   
+                        crossedSides.Add(triangleIndex);
                     }
                 }
             }
-            return (addMeshData, localVertexInterpolation);
+            return (addMeshData, localVertexInterpolation, crossedSides);
         }
 
         // originalMeshのエッジとテクスチャの境界点を検出し、新しい頂点のMeshDataと補完情報（両端の頂点インデックス昇順, 重み）を返す関数
@@ -616,16 +623,38 @@ namespace MeshDeletionTool
             }
         }
 
-        // 多角形頂点から三角ポリゴンに変換し頂点配列を返す
+        // 多角形頂点（残す頂点、辺上の新規頂点の順）を三角形の外周順に並べたインデックス列を返す
+        // 三角形の頂点 i を巡りながら、残す頂点なら追加し、続く辺 (i, i+1) に境界点があればそれを追加する
+        private List<int> createPolygonOutline(List<(int index, bool isRemoved)> triangleIndexs, List<int> crossedSides)
+        {
+            int keptCount = triangleIndexs.Count(t => !t.isRemoved);
+            List<int> outline = new List<int>(keptCount + crossedSides.Count);
+            int keptCursor = 0;
+            for (int i = 0; i < 3; i++)
+            {
+                if (!triangleIndexs[i].isRemoved)
+                {
+                    outline.Add(keptCursor++);
+                }
+                int crossing = crossedSides.IndexOf(i);
+                if (crossing >= 0)
+                {
+                    outline.Add(keptCount + crossing);
+                }
+            }
+            return outline;
+        }
+
+        // 外周順の多角形頂点から三角ポリゴンに変換し頂点配列を返す
         private int[] createTriangleFromPolygon(Mesh originalMesh, List<(int index, bool isRemoved)> triangleIndexs, List<Vector3> polygonVertices)
         {
             // 処理対象の三角ポリゴンから法線ベクトルを計算し、面の向きを指定する
-            Vector3[] basisVertices = {originalMesh.vertices[triangleIndexs[0].index],
-                                        originalMesh.vertices[triangleIndexs[1].index],
-                                        originalMesh.vertices[triangleIndexs[2].index]};
-            Vector3 normal = EarClipping3D.CalculateNormal(basisVertices);
-            // 耳切り法により、多角形外周頂点から三角ポリゴンに分割し、そのインデックス番号順を返す
-            int[] triangulatedIndices = EarClipping3D.Triangulate(polygonVertices.ToArray(), normal);
+            Vector3 a = originalMesh.vertices[triangleIndexs[0].index];
+            Vector3 b = originalMesh.vertices[triangleIndexs[1].index];
+            Vector3 c = originalMesh.vertices[triangleIndexs[2].index];
+            Vector3 normal = Vector3.Cross(b - a, c - a);
+            // 耳切り法により、多角形外周頂点から三角ポリゴンに分割し、そのインデックス番号順を返す（巻き順は元の三角形と同じ）
+            int[] triangulatedIndices = EarClipping2D.Triangulate(polygonVertices, normal);
             return triangulatedIndices;
         }
 

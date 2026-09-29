@@ -2,6 +2,8 @@ using System;
 using System.Collections.Generic;
 using UnityEngine;
 
+// XY 平面への投影と凸包に依存するため、凹多角形や XZ / YZ 平面に近い多角形を正しく扱えない。MeshDeletionTool.EarClipping2D に置き換えた
+[System.Obsolete("EarClipping2D を使用してください")]
 public class EarClipping3D
 {
     public static int[] Triangulate(Vector3[] vertices, Vector3 normal)

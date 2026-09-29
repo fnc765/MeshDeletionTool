@@ -78,4 +78,62 @@ public class MeshDeletionOptionsTest
         Assert.IsNull(MeshArraysComparer.FirstDifference(reference, fromOptions));
         Assert.Less(fromOptions.VertexCount, mesh.VertexCount + 200);
     }
+
+    [Test]
+    public void SettingsKey_IsEqualForEqualSettings()
+    {
+        // プレビューが生成済みのメッシュを使い回す条件: 同じ設定なら同じキー
+        MeshDeletionOptions a = new MeshDeletionOptions { AlphaThreshold = 0.25f, TargetSubMeshes = new[] { true, false } };
+        MeshDeletionOptions b = new MeshDeletionOptions { AlphaThreshold = 0.25f, TargetSubMeshes = new[] { true, false } };
+        Assert.AreEqual(a.SettingsKey(), b.SettingsKey());
+        Assert.AreEqual(new MeshDeletionOptions().SettingsKey(), new MeshDeletionOptions().SettingsKey());
+    }
+
+    [Test]
+    public void SettingsKey_ChangesWithEverySetting()
+    {
+        string reference = new MeshDeletionOptions().SettingsKey();
+        MeshDeletionOptions[] changed =
+        {
+            new MeshDeletionOptions { AlphaThreshold = 0.5001f },
+            new MeshDeletionOptions { RefineBoundary = false },
+            new MeshDeletionOptions { BoundaryPrecisionTexels = 1.5f },
+            new MeshDeletionOptions { RefineMaxDepth = 2 },
+            new MeshDeletionOptions { MergeAfterCut = false },
+            new MeshDeletionOptions { TargetSubMeshes = new[] { true } },
+        };
+        System.Collections.Generic.HashSet<string> keys = new System.Collections.Generic.HashSet<string> { reference };
+        foreach (MeshDeletionOptions options in changed)
+            Assert.IsTrue(keys.Add(options.SettingsKey()), options.SettingsKey());
+    }
+
+    [Test]
+    public void SettingsKey_DistinguishesSubMeshSelections()
+    {
+        // null（テクスチャを持つ全サブメッシュ）と明示の配列、配列の中身と長さを区別する
+        string all = new MeshDeletionOptions { TargetSubMeshes = null }.SettingsKey();
+        string tf = new MeshDeletionOptions { TargetSubMeshes = new[] { true, false } }.SettingsKey();
+        string ft = new MeshDeletionOptions { TargetSubMeshes = new[] { false, true } }.SettingsKey();
+        string tft = new MeshDeletionOptions { TargetSubMeshes = new[] { true, false, true } }.SettingsKey();
+        Assert.AreEqual(4, new System.Collections.Generic.HashSet<string> { all, tf, ft, tft }.Count);
+    }
+
+    [Test]
+    public void SettingsKey_DoesNotDependOnTheCulture()
+    {
+        // 小数点がカンマのカルチャでも同じキー（Unity の実行中のカルチャに依存しない）
+        System.Globalization.CultureInfo saved = System.Threading.Thread.CurrentThread.CurrentCulture;
+        MeshDeletionOptions options = new MeshDeletionOptions { AlphaThreshold = 0.25f, BoundaryPrecisionTexels = 1.5f };
+        string invariant = options.SettingsKey();
+        try
+        {
+            System.Threading.Thread.CurrentThread.CurrentCulture = new System.Globalization.CultureInfo("de-DE");
+            Assert.AreEqual(invariant, options.SettingsKey());
+        }
+        finally
+        {
+            System.Threading.Thread.CurrentThread.CurrentCulture = saved;
+        }
+        StringAssert.Contains("a=0.25;", invariant);
+    }
 }

@@ -29,11 +29,13 @@ namespace MeshDeletionTool
             ("ja-jp", key => MeshDeletionApplier.Messages.TryGetValue(key, out string value) ? value : null)
         });
 
+        // プレビュー（MeshDeletionPreviewFilter）はこの処理に結び付けて登録する（NDMF のプレビュー設定ではこの処理の位置に表示される）
         protected override void Configure()
         {
             InPhase(BuildPhase.Transforming)
                 .AfterPlugin("nadena.dev.modular-avatar")
-                .Run("MeshDeletionForTexture を適用", Apply);
+                .Run("MeshDeletionForTexture を適用", Apply)
+                .PreviewingWith(MeshDeletionPreviewFilter.Instance);
         }
 
         // アバター内の全 MeshDeletionForTexture（無効なオブジェクトのものも含む）を処理する。1 つが失敗しても他は処理し、最後にコンポーネントを取り除く

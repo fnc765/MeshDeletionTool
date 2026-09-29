@@ -34,6 +34,29 @@ namespace MeshDeletionTool
         // 切り口の間引きの許容誤差（テクセル）
         public float SimplifyToleranceTexels => BoundaryPrecisionTexels;
 
+        // 結果に影響する全ての設定を表す文字列（同じ設定なら同じ、どれかが違えば違う）。プレビューが生成済みのメッシュを使い回すかの判定に使う
+        // 数値はカルチャに依存しない往復可能な形式で書く。TargetSubMeshes は null（テクスチャを持つ全サブメッシュ）と明示の配列を区別する
+        public string SettingsKey()
+        {
+            System.Text.StringBuilder key = new System.Text.StringBuilder();
+            key.Append("a=").Append(AlphaThreshold.ToString("R", System.Globalization.CultureInfo.InvariantCulture));
+            key.Append(";r=").Append(RefineBoundary ? '1' : '0');
+            key.Append(";p=").Append(BoundaryPrecisionTexels.ToString("R", System.Globalization.CultureInfo.InvariantCulture));
+            key.Append(";d=").Append(RefineMaxDepth.ToString(System.Globalization.CultureInfo.InvariantCulture));
+            key.Append(";m=").Append(MergeAfterCut ? '1' : '0');
+            key.Append(";t=");
+            if (TargetSubMeshes == null)
+            {
+                key.Append('*');
+            }
+            else
+            {
+                foreach (bool target in TargetSubMeshes)
+                    key.Append(target ? '1' : '0');
+            }
+            return key.ToString();
+        }
+
         // この設定に対応する処理（各処理段の時間を記録する）。backend は呼び出し側が所有・Dispose する
         public AlphaMeshDeletionPipeline CreatePipeline(IAlphaStageBackend backend, Action<string> log)
         {

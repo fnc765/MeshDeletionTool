@@ -32,7 +32,7 @@ namespace MeshDeletionTool
     // GUI の「計算バックエンド」の選択肢
     public enum StageBackendMode
     {
-        // GPU が使えれば GPU、使えなければ CPU
+        // 境界の細分化が有効で GPU が使えれば GPU、それ以外は CPU
         Auto = 0,
         Cpu = 1,
         Gpu = 2

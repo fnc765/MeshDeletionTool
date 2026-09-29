@@ -43,8 +43,9 @@ SkinnedMeshRendererの補完に対応している<br>
 ## 計算バックエンド（CPU / GPU）と処理時間の計測（MeshDeletionToolForTexture）
 
 要素毎に独立な判定（頂点の透明判定、三角形の細分化判定、辺上の境界点の二分探索）は Compute Shader（`Editor/Shaders/MeshDeletionStages.compute`）でも実行できる。
-「計算バックエンド」で 自動（既定。GPU が使えれば GPU、使えなければ CPU）/ CPU / GPU を選ぶ。
-GPU が使えない環境（Compute Shader 非対応、`-nographics`、シェーダーが見つからない）では 1 行のログを出して CPU で処理する<br>
+「計算バックエンド」で 自動（既定）/ CPU / GPU を選ぶ。自動は「境界の細分化」が有効で Compute Shader が使えるときだけ GPU にし、それ以外は CPU にする
+（GPU で速くなるのは細分化の判定で、細分化なしでは GPU との転送の分だけ損になるため）。選んだバックエンドとその理由は 1 行のログに出す。
+GPU が使えない環境（Compute Shader 非対応、`-nographics`、シェーダーが見つからない）では CPU で処理する<br>
 CPU と GPU は同じ数式（`Editor/Core/StageKernels.cs` と HLSL を行単位で対応、閾値との比較は 256 要素の表の参照のみ）で計算し、出力メッシュはビット単位で同じになるように書かれている。
 それ以外の処理（辺の分割によるメッシュの再構成、耳切り法、切断後の再結合、Mesh との変換）は CPU で行う<br>
 「時間を計測」を有効にすると、使われたバックエンドと処理段毎の時間（細分化 / 頂点判定 / 切断 / 再結合、GPU ではカーネル毎のディスパッチ＋読み戻し時間）を Console に出す<br>

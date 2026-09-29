@@ -40,7 +40,7 @@ namespace MeshDeletionTool
         // 詳細設定の折りたたみ
         private bool showAdvancedSettings = false;
 
-        // 計算バックエンド（要素毎の判定を CPU と GPU のどちらで行うか。自動は GPU が使えれば GPU）と、処理時間の計測
+        // 計算バックエンド（要素毎の判定を CPU と GPU のどちらで行うか。自動は境界の細分化が有効で GPU が使えれば GPU、それ以外は CPU）と、処理時間の計測
         private StageBackendMode computeBackend = StageBackendMode.Auto;
         private bool measureTime = false;
         private static readonly string[] BackendLabels = { "自動", "CPU", "GPU" };
@@ -284,9 +284,9 @@ namespace MeshDeletionTool
             AlphaMask[] subMeshMasks = CollectAlphaMasks(originalMesh.subMeshCount, originalMaterials, targetSubMeshes);
             MeshArrays sourceArrays = MeshArraysUnityAdapter.FromMesh(originalMesh);
 
-            // 要素毎の判定の実行先（GPU が使えなければ CPU）
+            // 要素毎の判定の実行先（自動は細分化が有効で GPU が使えるときだけ GPU。GPU が使えなければ CPU）
             string backendNote = null;
-            IAlphaStageBackend backend = backendOverride ?? CreateBackend(computeBackend, out backendNote);
+            IAlphaStageBackend backend = backendOverride ?? CreateBackend(computeBackend, refineBoundary && refineMaxDepth > 0, out backendNote);
             if (backendOverride == null && backendNote != null)
             {
                 if (computeBackend == StageBackendMode.Gpu) Debug.LogWarning(backendNote); else Debug.Log(backendNote);
@@ -327,15 +327,26 @@ namespace MeshDeletionTool
             SaveNewMesh(newMesh);
         }
 
-        // 選択に従ってバックエンドを作る。GPU が使えなければ CPU にし、その理由を note に返す（1 行。使えたときは null）
-        internal static IAlphaStageBackend CreateBackend(StageBackendMode mode, out string note)
+        // 選択に従ってバックエンドを作り、選んだ理由を note に返す（1 行。CPU / GPU の明示的な選択がそのまま通ったときは null）
+        // 自動: GPU で速くなるのは境界の細分化の判定なので、細分化が有効（refineEnabled）で Compute Shader が使えるときだけ GPU にし、それ以外は CPU にする
+        // GPU: 使えなければ CPU にする（note は警告として出す）
+        internal static IAlphaStageBackend CreateBackend(StageBackendMode mode, bool refineEnabled, out string note)
         {
             note = null;
             if (mode == StageBackendMode.Cpu)
                 return new CpuStageBackend();
+            if (mode == StageBackendMode.Auto && !refineEnabled)
+            {
+                note = "計算バックエンド: CPU（境界の細分化が無効のため。GPU で速くなるのは細分化の判定）";
+                return new CpuStageBackend();
+            }
             IAlphaStageBackend gpu = ComputeStageBackend.TryCreate(out string reason);
             if (gpu != null)
+            {
+                if (mode == StageBackendMode.Auto)
+                    note = "計算バックエンド: " + gpu.Name + "（境界の細分化が有効で Compute Shader が使えるため）";
                 return gpu;
+            }
             note = (mode == StageBackendMode.Gpu ? "GPU が使えないため CPU で処理します: " : "計算バックエンド: CPU（") + reason + (mode == StageBackendMode.Gpu ? "" : "）");
             return new CpuStageBackend();
         }

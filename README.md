@@ -8,17 +8,6 @@
 
 # Functions list
 
-* ***MeshDeletionTool***<br>
-メッシュ処理に関連する一般的な機能を提供するクラス<br>
-
-* ***MeshDeletionToolForBox***<br>
-ボックスオブジェクトと削除対象オブジェクトを指定することでボックスオブジェクトに重なったメッシュを削除する<br>
-三角形が全て削除されたサブメッシュは空のまま残す（サブメッシュの数と順番、マテリアルとの対応を保つ）<br>
-MeshDeletionToolを継承している<br>
-
-* ***MeshGetColorInfo***<br>
-対象オブジェクトを指定することで、そのオブジェクトに含まれる各サブメッシュ毎に指定した頂点番号のテクスチャRGBA値をLogに出力する
-
 * ***MeshDeletionToolForTexture***<br>
 削除対象オブジェクトを指定することでそのオブジェクトが持っているテクスチャのアルファ値が0の頂点を削除する<br>
 また削除頂点と、そうでない頂点を含む辺に対して辺上でのアルファ境界値を二部探索しそこを新たな頂点として登録する<br>
@@ -29,7 +18,7 @@ SkinnedMeshRendererの補完に対応している<br>
 アルファ値は GPU が展開した値（描画に使われている値そのもの。圧縮テクスチャでは圧縮後の値）になる。PNG のアルファ値と厳密に一致させたいときはテクスチャのインポート設定を非圧縮にしておく<br>
 GPU が使えない環境（`-nographics` など）では従来通り、読み出す間だけインポート設定を読み取り可能・非圧縮に変更し、読み終えたら元に戻して再インポートする。使った経路と時間は 1 行のログに出る<br>
 マテリアルやテクスチャの無いサブメッシュにチェックが入っていても例外にはせず、1 行の警告を出して処理対象から外す。UV の無いメッシュや三角形でないサブメッシュを持つメッシュは 1 行のエラーで中止する<br>
-どちらのツールも出力は `Assets/NewMesh.asset`（メッシュ名は「元のメッシュ名_deleted」）に保存し、前回の出力を上書きする<br>
+出力は `Assets/NewMesh.asset`（メッシュ名は「元のメッシュ名_deleted」）に保存し、前回の出力を上書きする<br>
 
 # Features
 
@@ -66,7 +55,7 @@ CPU と GPU は同じ数式（`Editor/Core/StageKernels.cs` と HLSL を行単�
 cd <projectName>/Asset/
 git clone https://github.com/fnc765/MeshDeletionTool.git
 ```
-3. Unityプロジェクトを開き、メニューバーのToolから使いたい機能を呼び出す
+3. Unityプロジェクトを開き、メニューバーの Tools/MeshDeletionToolForTexture からウィンドウを開く
  
 # Note
  

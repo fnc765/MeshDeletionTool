@@ -3,7 +3,7 @@ using UnityEngine;
 
 namespace MeshDeletionTool
 {
-    // 頂点属性を1頂点ずつ集めるためのリストの束（MeshDeletionToolUtils の入れ子クラスから移動。Mesh には依存しない）
+    // 頂点属性を1頂点ずつ集めるためのリストの束（Mesh には依存しない）
     // 各リストは「無い（空）」か「頂点数と同じ長さ」のどちらかで、元のメッシュに無い属性は追加されない
     public class MeshData
     {

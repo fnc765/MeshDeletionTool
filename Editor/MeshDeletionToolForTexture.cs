@@ -6,7 +6,7 @@ using System.Linq;
 
 namespace MeshDeletionTool
 {
-    public class MeshDeletionToolForTexture : MeshDeletionToolUtils
+    public class MeshDeletionToolForTexture : EditorWindow
     {
         // 対象オブジェクトのRendererを保持するための内部フィールド
         internal Renderer targetRenderer;
@@ -71,8 +71,8 @@ namespace MeshDeletionTool
             targetRenderer = EditorGUILayout.ObjectField("対象オブジェクト", targetRenderer, typeof(Renderer), true) as Renderer;
 
             // 対象オブジェクトの Mesh とマテリアルは 1 回の描画で一度だけ取得する（無いときのエラーログを重ねて出さない）
-            Mesh originalMesh = targetRenderer != null ? GetOriginalMesh(targetRenderer) : null;
-            Material[] originalMaterials = targetRenderer != null ? GetOriginalMaterials(targetRenderer) : null;
+            Mesh originalMesh = targetRenderer != null ? MeshDeletionRunner.GetOriginalMesh(targetRenderer) : null;
+            Material[] originalMaterials = targetRenderer != null ? MeshDeletionRunner.GetOriginalMaterials(targetRenderer) : null;
 
             // アルファ閾値を指定するスライダーを追加
             GUILayout.Label("\n②アルファ閾値を設定", EditorStyles.boldLabel);
@@ -258,21 +258,20 @@ namespace MeshDeletionTool
         }
 
         // テクスチャの透明部分に基づいてメッシュを削除するメソッド
-        // Mesh とテクスチャの読み出し、結果の保存だけをここで行い、処理本体（細分化・判定・切断・再結合）は Unity に依存しない
-        // AlphaMeshDeletionPipeline が MeshArrays / AlphaMask に対して行う
+        // 設定の組み立てと結果の保存だけをここで行い、読み出しと処理は MeshDeletionRunner（処理本体は Unity に依存しない AlphaMeshDeletionPipeline）が行う
         private void DeleteMeshesFromTexture()
         {
             // 入力の検証
             if (!ValidateInputs(targetRenderer))
                 return;
-            Mesh originalMesh = GetOriginalMesh(targetRenderer);
+            Mesh originalMesh = MeshDeletionRunner.GetOriginalMesh(targetRenderer);
             if (originalMesh == null)
                 return;
             bool[] targetSubMeshes = GetTargetSubMeshes(originalMesh.subMeshCount);
 
             // 要素毎の判定の実行先（細分化が有効で GPU が使えるときは GPU、それ以外は CPU。選んだ理由は 1 行のログに出す）
             string backendNote = null;
-            IAlphaStageBackend backend = backendOverride ?? CreateBackend(refineBoundary && refineMaxDepth > 0, out backendNote);
+            IAlphaStageBackend backend = backendOverride ?? MeshDeletionRunner.CreateBackend(refineBoundary && refineMaxDepth > 0, out backendNote);
             if (backendOverride == null)
                 Debug.Log(backendNote);
 
@@ -293,8 +292,8 @@ namespace MeshDeletionTool
             MeshArrays newArrays;
             try
             {
-                newArrays = Execute(targetRenderer, targetSubMeshes, pipeline);
-                Debug.Log(DescribeResult(originalMesh.name, MeshArraysUnityAdapter.FromMesh(originalMesh), newArrays, pipeline));
+                newArrays = MeshDeletionRunner.Execute(targetRenderer, targetSubMeshes, pipeline);
+                Debug.Log(MeshDeletionRunner.DescribeResult(originalMesh.name, MeshArraysUnityAdapter.FromMesh(originalMesh), newArrays, pipeline));
             }
             catch (ArgumentException e)
             {
@@ -315,81 +314,6 @@ namespace MeshDeletionTool
             SaveNewMesh(newMesh);
         }
 
-        // GUI を介さない処理の入口（テスト・計測用。ウィンドウの実行ボタンも同じ処理を通る）
-        // 対象オブジェクトの Mesh と処理対象サブメッシュのテクスチャを読み出し、pipeline（設定とバックエンドを持つ）で処理した結果を返す。保存はしない
-        // targetSubMeshes[i] はサブメッシュ i を処理するかどうか（null ならテクスチャを持つ全サブメッシュ）。バックエンドの Dispose は呼び出し側が行う
-        // 処理段の時間は pipeline.StageTimings と pipeline.Backend.Timings に、出力三角形 → 元の三角形の対応は pipeline.OutputTriangleParents に残る
-        // メッシュが処理できない形（三角形でないサブメッシュ、UV 無し）なら、テクスチャを読む前に ArgumentException を投げる
-        internal static MeshArrays Execute(Renderer renderer, bool[] targetSubMeshes, AlphaMeshDeletionPipeline pipeline)
-        {
-            if (renderer == null)
-                throw new ArgumentNullException(nameof(renderer));
-            Mesh originalMesh = GetOriginalMesh(renderer);
-            Material[] originalMaterials = GetOriginalMaterials(renderer);
-            if (originalMesh == null || originalMaterials == null)
-                throw new ArgumentException("対象オブジェクトに有効なメッシュがありません。", nameof(renderer));
-            string meshProblem = FindMeshProblem(originalMesh, true);
-            if (meshProblem != null)
-                throw new ArgumentException(meshProblem, nameof(renderer));
-            WarnIfBonesPerVertexExceedFour(originalMesh);
-            if (targetSubMeshes == null)
-            {
-                targetSubMeshes = SubMeshesWithTexture(originalMesh.subMeshCount, originalMaterials);
-            }
-            else if (targetSubMeshes.Length != originalMesh.subMeshCount)
-            {
-                throw new ArgumentException("targetSubMeshes の長さがサブメッシュ数と異なります。", nameof(targetSubMeshes));
-            }
-            else
-            {
-                // テクスチャを読めないサブメッシュは対象から外すので、呼び出し側の配列を変えないよう写しを使う
-                targetSubMeshes = (bool[])targetSubMeshes.Clone();
-            }
-
-            // テクスチャのアルファ値とメッシュの頂点属性を一度だけ読み出す（テクスチャを読めないサブメッシュは処理対象から外れる）
-            AlphaMask[] subMeshMasks = CollectAlphaMasks(originalMesh.subMeshCount, originalMaterials, targetSubMeshes);
-            MeshArrays sourceArrays = MeshArraysUnityAdapter.FromMesh(originalMesh);
-
-            // 細分化 → 削除する頂点の判定 → 切断 → 再結合
-            return pipeline.Run(sourceArrays, subMeshMasks, targetSubMeshes);
-        }
-
-        // 要素毎の判定の実行先を自動で選び、選んだ理由を note に返す（1 行）
-        // GPU で速くなるのは境界の細分化の判定なので、細分化が有効（refineEnabled）で Compute Shader（Editor/Shaders/MeshDeletionStages.compute）が使えるときは GPU、
-        // それ以外（細分化が無効、Compute Shader 非対応、-nographics、シェーダーが見つからない）は CPU にする。結果はどちらでも同じ
-        internal static IAlphaStageBackend CreateBackend(bool refineEnabled, out string note)
-        {
-            if (!refineEnabled)
-            {
-                note = "計算バックエンド: CPU（境界の細分化が無効のため。GPU で速くなるのは細分化の判定）";
-                return new CpuStageBackend();
-            }
-            IAlphaStageBackend gpu = ComputeStageBackend.TryCreate(out string reason);
-            if (gpu != null)
-            {
-                note = "計算バックエンド: " + gpu.Name;
-                return gpu;
-            }
-            note = "計算バックエンド: CPU（" + reason + "）";
-            return new CpuStageBackend();
-        }
-
-        // 実行結果の 1 行の要約（頂点数・三角形数の変化と処理段毎の時間）
-        internal static string DescribeResult(string meshName, MeshArrays source, MeshArrays result, AlphaMeshDeletionPipeline pipeline)
-        {
-            System.Text.StringBuilder text = new System.Text.StringBuilder();
-            double total = 0;
-            foreach (StageTiming timing in pipeline.StageTimings)
-            {
-                text.Append(text.Length > 0 ? ", " : " (").Append(timing.Name).Append(' ').Append(timing.Milliseconds.ToString("0.0")).Append(" ms");
-                total += timing.Milliseconds;
-            }
-            if (text.Length > 0)
-                text.Append(')');
-            return "MeshDeletionForTexture '" + meshName + "': 頂点 " + source.VertexCount + " → " + result.VertexCount +
-                   ", 三角形 " + source.TriangleCount + " → " + result.TriangleCount + ", " + total.ToString("0.0") + " ms" + text;
-        }
-
         // サブメッシュ毎の処理対象フラグ（チェックの無いサブメッシュは対象外）
         private bool[] GetTargetSubMeshes(int subMeshCount)
         {
@@ -401,79 +325,15 @@ namespace MeshDeletionTool
             return targets;
         }
 
-        // メインテクスチャ（Texture2D）を持つサブメッシュを処理対象にしたフラグ（マテリアルの数がサブメッシュ数より少ない・空のスロットは対象外）
-        internal static bool[] SubMeshesWithTexture(int subMeshCount, Material[] materials)
+        // 出力メッシュを固定のパスに保存する（前回の出力は上書きされる）
+        private static void SaveNewMesh(Mesh newMesh)
         {
-            bool[] targets = new bool[subMeshCount];
-            for (int subMeshIndex = 0; subMeshIndex < subMeshCount; subMeshIndex++)
-            {
-                Material material = subMeshIndex < materials.Length ? materials[subMeshIndex] : null;
-                targets[subMeshIndex] = material != null && material.mainTexture is Texture2D;
-            }
-            return targets;
-        }
-
-        // 処理対象サブメッシュのテクスチャのアルファ値の読み出し（対象外のサブメッシュとテクスチャの無いサブメッシュは null）
-        // マテリアルが無い（数が足りない・空のスロット）、テクスチャが無い、テクスチャを読めないサブメッシュは例外にせず、1 行のログを出して
-        // targetSubMeshes から外す（処理本体はテクスチャの無いサブメッシュを対象にできないため、対象と読み出し結果を常に一致させる）
-        // 読み出しは AlphaMaskReader（GPU 経由。インポート設定は変更しない。GPU が使えないときだけインポート設定の一時変更）で、同じテクスチャは一度だけ読む
-        // 使った経路と時間は 1 行のログに出す
-        internal static AlphaMask[] CollectAlphaMasks(int subMeshCount, Material[] originalMaterials, bool[] targetSubMeshes)
-        {
-            AlphaMask[] masks = CollectAlphaMasks(subMeshCount, originalMaterials, targetSubMeshes, out string readNote);
-            if (readNote != null)
-                Debug.Log(readNote);
-            return masks;
-        }
-
-        // readNote に読み出しの経路と時間（1 行。読むテクスチャが無ければ null）を返す版
-        internal static AlphaMask[] CollectAlphaMasks(int subMeshCount, Material[] originalMaterials, bool[] targetSubMeshes, out string readNote)
-        {
-            readNote = null;
-            Texture2D[] subMeshTextures = new Texture2D[subMeshCount];
-            List<Texture2D> distinctTextures = new List<Texture2D>();
-            for (int subMeshIndex = 0; subMeshIndex < subMeshCount; subMeshIndex++)
-            {
-                if (!targetSubMeshes[subMeshIndex])
-                    continue;
-                Material material = subMeshIndex < originalMaterials.Length ? originalMaterials[subMeshIndex] : null;
-                if (material == null)
-                {
-                    Debug.LogWarning("サブメッシュ " + subMeshIndex + " にはマテリアルが無いため処理対象から外します。");
-                    targetSubMeshes[subMeshIndex] = false;
-                    continue;
-                }
-                Texture2D texture = material.mainTexture as Texture2D;
-                if (texture == null)
-                {
-                    Debug.LogWarning("サブメッシュ " + subMeshIndex + " のマテリアル '" + material.name + "' にはテクスチャ（Texture2D）が無いため処理対象から外します。");
-                    targetSubMeshes[subMeshIndex] = false;
-                    continue;
-                }
-                subMeshTextures[subMeshIndex] = texture;
-                if (!distinctTextures.Contains(texture))
-                    distinctTextures.Add(texture);
-            }
-
-            AlphaMask[] subMeshMasks = new AlphaMask[subMeshCount];
-            if (distinctTextures.Count == 0)
-                return subMeshMasks;
-            Dictionary<Texture2D, AlphaMask> maskCache = AlphaMaskReader.Read(distinctTextures, out readNote);
-            for (int subMeshIndex = 0; subMeshIndex < subMeshCount; subMeshIndex++)
-            {
-                Texture2D texture = subMeshTextures[subMeshIndex];
-                if (texture == null)
-                    continue;
-                maskCache.TryGetValue(texture, out AlphaMask mask);
-                subMeshMasks[subMeshIndex] = mask;
-                if (mask == null)
-                    targetSubMeshes[subMeshIndex] = false;   // 読めなかった理由は AlphaMaskReader / TemporaryReadableTextures が出している
-            }
-            return subMeshMasks;
+            AssetDatabase.CreateAsset(newMesh, "Assets/NewMesh.asset");
+            AssetDatabase.SaveAssets();
         }
 
         // 入力を検証するメソッド
-        private bool ValidateInputs(Renderer targetRenderer)
+        private static bool ValidateInputs(Renderer targetRenderer)
         {
             if (targetRenderer == null)
             {

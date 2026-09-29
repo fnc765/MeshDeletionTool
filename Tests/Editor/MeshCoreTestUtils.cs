@@ -2,7 +2,7 @@ using System.Collections.Generic;
 using UnityEngine;
 using MeshDeletionTool;
 
-// Unity に依存しない中核クラス（AlphaMeshCutter / MeshVertexRemover / AlphaMeshDeletionPipeline）のテスト用データ
+// Unity に依存しない中核クラス（AlphaMeshCutter / AlphaMeshDeletionPipeline）のテスト用データ
 public static class MeshCoreTestUtils
 {
     // n×n の格子（XY 平面、uv = 位置）。左半分の四角形をサブメッシュ 0、右半分をサブメッシュ 1 にする

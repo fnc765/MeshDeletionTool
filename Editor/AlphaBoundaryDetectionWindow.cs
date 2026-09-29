@@ -4,7 +4,6 @@ using UnityEngine;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
-using Unity.VisualScripting;
 
 // AlphaBoundaryDetectionWindowクラスを定義し、EditorWindowを継承
 public class AlphaBoundaryDetectionWindow : EditorWindow

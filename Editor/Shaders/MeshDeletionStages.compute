@@ -1,11 +1,25 @@
 // MeshDeletionTool の要素毎に独立な処理段（頂点の透明判定・三角形の細分化判定・辺上の境界点の二分探索）の Compute Shader 実装
 // Editor/Core/StageKernels.cs（StageKernelContext）の C# 実装と関数・行単位で対応させてあり、CPU と同じ結果（ビット単位）を返すことを意図している:
-//   - float の演算には precise を付け、融合（mad）と並べ替えを禁止して C# と同じ順序で計算する
+//   - float の演算には precise を付け、融合（mad）と並べ替えを禁止して C# と同じ順序で計算する（下の「precise の規則」）
 //   - 閾値との比較は CPU で作った 256 要素の表（_AlphaClass: 0 閾値未満 / 1 等しい / 2 より大きい）の参照だけで行い、GPU では float を比較しない
 //   - テクセル座標は従来と同じ (int)(u * (幅 - 1))、ラップは同じ整数演算
 //   - 最長辺の判定は平方根を取らず 2 乗のまま比較する（正しく丸められた sqrt では sqrt(s) < 1 ⇔ s < 1）
 //   - 多角形の面積 0 の判定は == 0、バウンディングボックスは float のまま範囲内に制限してから floor する
 // 要素は 1 次元（numthreads(64,1,1)、要素番号 = SV_DispatchThreadID.x）。C# 側は同じ番号付けで 0 〜 _Count-1 を順に実行する
+//
+// precise の規則（CPU との一致の監査）:
+//   実機（RX 7900 XTX, D3D11）で 1 頂点の二分探索が 1 段ずれた（重みが 1/1024 違う）。原因の候補として見つかったのは LerpUV の書き方で、
+//   「precise float2 r; r.x = a.x + (b.x - a.x) * t;」のように precise のベクトルへ成分ごとに代入すると、glslang では式の減算・乗算・加算に
+//   NoContraction が付かなかった（BisectEdges の 18 演算のうち 6、RefineTriangleTest の 65 演算のうち 14 が無印）。FXC でも同様に mad へ融合されると
+//   中点の UV が 1 ulp 変わり、テクセル境界の直上に落ちたときだけ分類が変わって二分探索が 1 段ずれる。以下の規則で全ての演算を守る:
+//   1. float の演算（+ - * /）は 1 つずつ別の文にし、その結果を precise の変数に代入する。1 つの文に 2 つ以上の演算を書かない
+//      （precise は代入先に書き込む演算を融合・並べ替えから守る。式の途中の演算まで守られるかはコンパイラ（FXC / DXC / Metal）に依存するため頼らない）
+//   2. 関数の引数・配列の要素・構造体のメンバーの値は、演算に使う前に precise のローカル変数に写す
+//   3. 比較（<, ==）の左辺も precise の変数にしてから比べる（cross * orientation < 0 を符号判定に置き換えられないようにする）
+//   4. lerp / mad / dot / length / saturate などの組み込み関数は使わない。x / 2.0f はそのまま書く（2 の冪の除算は正確なので * 0.5f への置き換えは結果を変えない）
+//   5. 整数演算・比較・表の参照・ftoi（(int) キャスト、0 方向への切り捨て）・floor はどの実装でも同じ結果なので対象外
+//   6. C#（StageKernels.cs）も同じ文の分け方で書く（Mono は float32 演算を単精度で行うので、C# 側の文の分け方は結果を変えない）
+//   検証: glslang（HLSL フロントエンド）で SPIR-V にすると、全ての float 演算に NoContraction が付く（perf/phaseC の validate_hlsl.sh）。FXC（D3D11）は PC で確認する
 #pragma kernel ClassifyVertices
 #pragma kernel RefineTriangleTest
 #pragma kernel BisectEdges
@@ -98,8 +112,12 @@ int WrapTexel(int i, int size, int mode)
 // UV座標が示すテクセル（(int)(u * (幅 - 1))、範囲外はラップ）のアルファ値の分類
 uint SampleClass(MaskView m, float2 uv)
 {
-    precise float px = uv.x * (float)(m.Width - 1);
-    precise float py = uv.y * (float)(m.Height - 1);
+    precise float u = uv.x;
+    precise float v = uv.y;
+    precise float w = (float)(m.Width - 1);
+    precise float h = (float)(m.Height - 1);
+    precise float px = u * w;
+    precise float py = v * h;
     int x = (int)px;
     int y = (int)py;
     if (x < 0 || x >= m.Width) x = WrapTexel(x, m.Width, m.WrapU);
@@ -113,13 +131,23 @@ bool IsBoundaryClass(uint class1, uint class2)
     return (class1 == 0u && class2 == 2u) || (class1 == 2u && class2 == 0u);
 }
 
-// Vector2.Lerp と同じ式（t を 0〜1 に制限し、a + (b - a) * t）
+// Vector2.Lerp と同じ式（t を 0〜1 に制限し、a + (b - a) * t）。減算・乗算・加算を別の文にして mad への融合を防ぐ
 float2 LerpUV(float2 a, float2 b, float t)
 {
-    t = t < 0.0f ? 0.0f : (t > 1.0f ? 1.0f : t);
+    precise float tc = t < 0.0f ? 0.0f : (t > 1.0f ? 1.0f : t);
+    precise float ax = a.x;
+    precise float ay = a.y;
+    precise float bx = b.x;
+    precise float by = b.y;
+    precise float dx = bx - ax;
+    precise float dy = by - ay;
+    precise float mx = dx * tc;
+    precise float my = dy * tc;
+    precise float rx = ax + mx;
+    precise float ry = ay + my;
     precise float2 r;
-    r.x = a.x + (b.x - a.x) * t;
-    r.y = a.y + (b.y - a.y) * t;
+    r.x = rx;
+    r.y = ry;
     return r;
 }
 
@@ -132,7 +160,8 @@ float BisectEdge(MaskView m, float2 uv1, float2 uv2)
     [loop]
     for (int i = 0; i < BISECTION_STEPS; i++)
     {
-        precise float t = (tMin + tMax) / 2.0f;
+        precise float sum = tMin + tMax;
+        precise float t = sum / 2.0f;
         float2 midUV = LerpUV(uv1, uv2, t);
         uint midClass = SampleClass(m, midUV);
         if (IsBoundaryClass(class1, midClass))
@@ -145,7 +174,8 @@ float BisectEdge(MaskView m, float2 uv1, float2 uv2)
             class1 = midClass;
         }
     }
-    precise float weight = (tMin + tMax) / 2.0f;
+    precise float finalSum = tMin + tMax;
+    precise float weight = finalSum / 2.0f;
     return weight;
 }
 
@@ -164,6 +194,8 @@ int CountOpaqueTexels(MaskView m, float2 polygon[MAX_POLYGON_POINTS], int pointC
     if (pointCount < 3) return 0;
 
     // テクセル座標系 (x = u * (w - 1), y = v * (h - 1)) に変換し、バウンディングボックスを求める
+    precise float w = (float)(m.Width - 1);
+    precise float h = (float)(m.Height - 1);
     precise float px[MAX_POLYGON_POINTS];
     precise float py[MAX_POLYGON_POINTS];
     precise float minX = 3.402823466e+38f, minY = 3.402823466e+38f, maxX = -3.402823466e+38f, maxY = -3.402823466e+38f;
@@ -171,8 +203,10 @@ int CountOpaqueTexels(MaskView m, float2 polygon[MAX_POLYGON_POINTS], int pointC
     [loop]
     for (i = 0; i < pointCount; i++)
     {
-        px[i] = polygon[i].x * (float)(m.Width - 1);
-        py[i] = polygon[i].y * (float)(m.Height - 1);
+        precise float pu = polygon[i].x;
+        precise float pv = polygon[i].y;
+        px[i] = pu * w;
+        py[i] = pv * h;
         minX = minX < px[i] ? minX : px[i];
         minY = minY < py[i] ? minY : py[i];
         maxX = maxX > px[i] ? maxX : px[i];
@@ -185,7 +219,14 @@ int CountOpaqueTexels(MaskView m, float2 polygon[MAX_POLYGON_POINTS], int pointC
     for (i = 0; i < pointCount; i++)
     {
         j = (i + 1) % pointCount;
-        signedArea += px[i] * py[j] - px[j] * py[i];
+        precise float pxi = px[i];
+        precise float pyi = py[i];
+        precise float pxj = px[j];
+        precise float pyj = py[j];
+        precise float a1 = pxi * pyj;
+        precise float a2 = pxj * pyi;
+        precise float d = a1 - a2;
+        signedArea = signedArea + d;
     }
     if (signedArea == 0.0f) return 0;
     precise float orientation = signedArea > 0.0f ? 1.0f : -1.0f;
@@ -212,26 +253,41 @@ int CountOpaqueTexels(MaskView m, float2 polygon[MAX_POLYGON_POINTS], int pointC
     for (i = 0; i < pointCount; i++)
     {
         j = (i + 1) % pointCount;
-        edgeDx[i] = px[j] - px[i];
-        edgeDy[i] = py[j] - py[i];
+        precise float pxi = px[i];
+        precise float pyi = py[i];
+        precise float pxj = px[j];
+        precise float pyj = py[j];
+        edgeDx[i] = pxj - pxi;
+        edgeDy[i] = pyj - pyi;
     }
 
     int count = 0;
     [loop]
     for (int y = y0; y <= y1; y += stride)
     {
-        precise float centerY = (float)y + 0.5f;
+        precise float yf = (float)y;
+        precise float centerY = yf + 0.5f;
         [loop]
         for (int x = x0; x <= x1; x += stride)
         {
             // テクセルの中心が多角形の内部にあるか
-            precise float centerX = (float)x + 0.5f;
+            precise float xf = (float)x;
+            precise float centerX = xf + 0.5f;
             bool inside = true;
             [loop]
             for (i = 0; i < pointCount; i++)
             {
-                precise float cross = edgeDx[i] * (centerY - py[i]) - edgeDy[i] * (centerX - px[i]);
-                if (cross * orientation < 0.0f)
+                precise float pxi = px[i];
+                precise float pyi = py[i];
+                precise float ex = edgeDx[i];
+                precise float ey = edgeDy[i];
+                precise float dyc = centerY - pyi;
+                precise float dxc = centerX - pxi;
+                precise float c1 = ex * dyc;
+                precise float c2 = ey * dxc;
+                precise float cross = c1 - c2;
+                precise float side = cross * orientation;
+                if (side < 0.0f)
                 {
                     inside = false;
                     break;
@@ -256,14 +312,24 @@ bool RefineTest(MaskView m, float2 uv0, float2 uv1, float2 uv2, int i0, int i1, 
     int i, j;
 
     // 最長辺が 1 テクセル未満の三角形はこれ以上細分化しない（2 乗のまま比較する）
+    precise float w = (float)(m.Width - 1);
+    precise float h = (float)(m.Height - 1);
     precise float longestSq = 0.0f;
     [loop]
     for (i = 0; i < 3; i++)
     {
         j = (i + 1) % 3;
-        precise float ex = (uv[j].x - uv[i].x) * (float)(m.Width - 1);
-        precise float ey = (uv[j].y - uv[i].y) * (float)(m.Height - 1);
-        precise float sq = ex * ex + ey * ey;
+        precise float uix = uv[i].x;
+        precise float uiy = uv[i].y;
+        precise float ujx = uv[j].x;
+        precise float ujy = uv[j].y;
+        precise float dux = ujx - uix;
+        precise float duy = ujy - uiy;
+        precise float ex = dux * w;
+        precise float ey = duy * h;
+        precise float exx = ex * ex;
+        precise float eyy = ey * ey;
+        precise float sq = exx + eyy;
         longestSq = longestSq > sq ? longestSq : sq;
     }
     if (longestSq < 1.0f) return false;

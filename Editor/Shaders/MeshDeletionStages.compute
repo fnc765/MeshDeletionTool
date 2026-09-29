@@ -107,7 +107,7 @@ uint SampleClass(MaskView m, float2 uv)
     return _AlphaClass[LoadAlpha(m, x, y)];
 }
 
-// 片方が閾値未満で他方が閾値より大きい（AlphaSampling.IsBoundaryEdge の条件）
+// 片方が閾値未満で他方が閾値より大きい（従来の AlphaSampling.IsBoundaryEdge の条件）
 bool IsBoundaryClass(uint class1, uint class2)
 {
     return (class1 == 0u && class2 == 2u) || (class1 == 2u && class2 == 0u);
@@ -123,7 +123,7 @@ float2 LerpUV(float2 a, float2 b, float t)
     return r;
 }
 
-// 辺上の境界点の重み（AlphaSampling.FindAlphaBoundary と同じ 10 回の二分探索）
+// 辺上の境界点の重み（従来の AlphaSampling.FindAlphaBoundary と同じ 10 回の二分探索）
 float BisectEdge(MaskView m, float2 uv1, float2 uv2)
 {
     uint class1 = SampleClass(m, uv1);

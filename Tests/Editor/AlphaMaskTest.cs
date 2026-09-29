@@ -2,7 +2,7 @@ using UnityEngine;
 using NUnit.Framework;
 using MeshDeletionTool;
 
-// AlphaMask（テクセル参照の規則）と AlphaSampling（境界判定・二分探索）のテスト
+// AlphaMask（テクセル参照の規則）と、テストの参照実装が使う AlphaSampling（境界判定・二分探索）のテスト
 public class AlphaMaskTest
 {
     // 幅 w のうち左半分 (x < w / 2) が透明、右半分が不透明のマスク
@@ -24,7 +24,6 @@ public class AlphaMaskTest
         Assert.AreEqual(200, mask.AlphaByte(2, 1));
         Assert.AreEqual(200 / 255f, mask.Alpha(2, 1));
         Assert.AreEqual(0, mask.AlphaByte(1, 1));
-        Assert.AreEqual(2, mask.SampleCount + 0 - 1);   // 3 回参照した
     }
 
     [Test]
@@ -111,16 +110,14 @@ public class AlphaMaskTest
     [Test]
     public void BuildOpaqueTable_MatchesAlphaComparison()
     {
-        AlphaMask mask = HalfOpaque(4, 4);
         foreach (float threshold in new[] { 0f, 0.001f, 0.5f, 127 / 255f, 128 / 255f, 1f })
         {
-            bool[] table = mask.BuildOpaqueTable(threshold);
+            bool[] table = ScalarStageOracle.BuildOpaqueTable(threshold);
             Assert.AreEqual(256, table.Length);
             for (int value = 0; value < 256; value++)
             {
                 Assert.AreEqual(value / 255f >= threshold, table[value], "value " + value + " threshold " + threshold);
             }
         }
-        Assert.AreEqual(mask.AlphaByte(3, 1), mask.AlphaByteUnchecked(3, 1));
     }
 }

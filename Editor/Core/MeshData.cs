@@ -94,67 +94,7 @@ namespace MeshDeletionTool
             }
         }
 
-        public MeshData GetElementAt(int index)
-        {
-            var result = new MeshData();
-
-            if (index < Vertices.Count)
-            {
-                result.Vertices.Add(Vertices[index]);
-            }
-            if (index < Normals.Count)
-            {
-                result.Normals.Add(Normals[index]);
-            }
-            if (index < Tangents.Count)
-            {
-                result.Tangents.Add(Tangents[index]);
-            }
-            if (index < UV.Count)
-            {
-                result.UV.Add(UV[index]);
-            }
-            if (index < UV2.Count)
-            {
-                result.UV2.Add(UV2[index]);
-            }
-            if (index < UV3.Count)
-            {
-                result.UV3.Add(UV3[index]);
-            }
-            if (index < UV4.Count)
-            {
-                result.UV4.Add(UV4[index]);
-            }
-            if (index < UV5.Count)
-            {
-                result.UV5.Add(UV5[index]);
-            }
-            if (index < UV6.Count)
-            {
-                result.UV6.Add(UV6[index]);
-            }
-            if (index < UV7.Count)
-            {
-                result.UV7.Add(UV7[index]);
-            }
-            if (index < UV8.Count)
-            {
-                result.UV8.Add(UV8[index]);
-            }
-            if (index < Colors.Count)
-            {
-                result.Colors.Add(Colors[index]);
-            }
-            if (index < BoneWeights.Count)
-            {
-                result.BoneWeights.Add(BoneWeights[index]);
-            }
-
-            return result;
-        }
-
-        // 別の MeshData の index 番目の頂点の属性を追加する（GetElementAt + Add と同じだが、途中の MeshData を作らない）
+        // 別の MeshData の index 番目の頂点の属性を追加する（途中の MeshData を作らない）
         public void AddElementAt(MeshData source, int index)
         {
             if (index < source.Vertices.Count) Vertices.Add(source.Vertices[index]);

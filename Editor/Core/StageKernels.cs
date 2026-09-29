@@ -200,7 +200,7 @@ namespace MeshDeletionTool
             return AlphaClass[LoadAlpha(m, x, y)];
         }
 
-        // 片方が閾値未満で他方が閾値より大きい（AlphaSampling.IsBoundaryEdge の条件）
+        // 片方が閾値未満で他方が閾値より大きい（従来の AlphaSampling.IsBoundaryEdge の条件）
         private static bool IsBoundaryClass(byte class1, byte class2)
         {
             return (class1 == 0 && class2 == 2) || (class1 == 2 && class2 == 0);
@@ -216,7 +216,7 @@ namespace MeshDeletionTool
             return r;
         }
 
-        // 辺上の境界点の重み（AlphaSampling.FindAlphaBoundary と同じ 10 回の二分探索）
+        // 辺上の境界点の重み（従来の AlphaSampling.FindAlphaBoundary と同じ 10 回の二分探索）
         private float BisectEdge(MaskView m, Vector2 uv1, Vector2 uv2)
         {
             byte class1 = SampleClass(m, uv1);

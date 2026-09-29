@@ -65,7 +65,7 @@ public class StageKernelsTest
         foreach (float threshold in new[] { 0f, 0.2f, 0.5f, 0.75f, 1f })
         {
             byte[] table = StageKernelContext.BuildAlphaClassTable(threshold);
-            bool[] opaque = new AlphaMask(1, 1, new byte[1]).BuildOpaqueTable(threshold);
+            bool[] opaque = ScalarStageOracle.BuildOpaqueTable(threshold);
             for (int value = 0; value < 256; value++)
             {
                 float alpha = value / 255f;

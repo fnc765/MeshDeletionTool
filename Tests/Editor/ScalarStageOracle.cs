@@ -95,6 +95,12 @@ public static class ScalarStageOracle
         return longest;
     }
 
+    // アルファ値（0〜255）ごとに「alphaThreshold 以上（不透明）か」を表す 256 個の表
+    public static bool[] BuildOpaqueTable(float alphaThreshold)
+    {
+        return ScalarStageOracleTables.BuildOpaqueTable(alphaThreshold);
+    }
+
     // 凸多角形（UV座標）の内部にある不透明テクセルの数を数える（stopAt に達したら打ち切る）
     public static int CountOpaqueTexels(AlphaMask mask, IList<Vector2> polygon, float alphaThreshold, int stopAt, int maxRasterSize)
     {
@@ -148,7 +154,7 @@ public static class ScalarStageOracle
             edgeDx[i] = q.x - p.x;
             edgeDy[i] = q.y - p.y;
         }
-        bool[] opaque = mask.BuildOpaqueTable(alphaThreshold);
+        bool[] opaque = BuildOpaqueTable(alphaThreshold);
 
         int count = 0;
         for (int y = y0; y <= y1; y += stride)
@@ -171,7 +177,7 @@ public static class ScalarStageOracle
                 {
                     continue;
                 }
-                if (opaque[mask.AlphaByteUnchecked(x, y)])
+                if (opaque[mask.AlphaByte(x, y)])
                 {
                     count++;
                     if (count >= stopAt)
@@ -182,6 +188,83 @@ public static class ScalarStageOracle
             }
         }
         return count;
+    }
+}
+
+// アルファ値（0〜255）ごとに「alphaThreshold 以上（不透明）か」を表す 256 個の表（StageKernelContext.BuildAlphaClassTable の参照実装）
+public static class ScalarStageOracleTables
+{
+    public static bool[] BuildOpaqueTable(float alphaThreshold)
+    {
+        bool[] table = new bool[256];
+        for (int value = 0; value < 256; value++)
+        {
+            table[value] = value / 255f >= alphaThreshold;
+        }
+        return table;
+    }
+}
+
+// 従来の処理（バックエンド導入前）が使っていた、UV座標が示すテクセルのアルファ値の判定。製品コードでは StageKernelContext に置き換わり、
+// ここでは参照実装（ScalarStageOracle）とテストだけが使う
+// UV座標が示すテクセルのアルファ値の判定（削除処理・細分化・辺上の境界点の二分探索で共用）
+public static class AlphaSampling
+{
+    // UV座標が示すテクセルのアルファ値
+    public static float SampleAlpha(AlphaMask mask, Vector2 uv)
+    {
+        return mask.AlphaAt(uv);
+    }
+
+    // UV座標が示すテクセルが透明（削除対象）かどうか
+    public static bool IsTransparent(AlphaMask mask, Vector2 uv, float alphaThreshold)
+    {
+        return SampleAlpha(mask, uv) < alphaThreshold;
+    }
+
+    // UV座標が示すテクスチャのピクセルが境界エッジかどうかを判定する関数
+    public static bool IsBoundaryEdge(AlphaMask mask, Vector2 uv1, Vector2 uv2, float alphaThreshold)
+    {
+        // 両端点のピクセルのアルファ値を取得
+        float alpha1 = SampleAlpha(mask, uv1);
+        float alpha2 = SampleAlpha(mask, uv2);
+
+        // 片方のピクセルが透明で、もう片方が透明でない場合は境界エッジとする
+        return (alpha1 < alphaThreshold && alpha2 > alphaThreshold) || (alpha1 > alphaThreshold && alpha2 < alphaThreshold);
+    }
+
+    // テクスチャのアルファ値に基づき、エッジ上の境界点のUV座標の補完用重みを求める
+    public static float FindAlphaBoundary(AlphaMask mask, Vector2 uv1, Vector2 uv2, float alphaThreshold)
+    {
+        // 開始点のアルファ値を取得
+        float alpha1 = SampleAlpha(mask, uv1);
+
+        float tMin = 0.0f;
+        float tMax = 1.0f;
+
+        // 二分探索を用いて境界点を探す
+        for (int i = 0; i < 10; i++)
+        {
+            float t = (tMin + tMax) / 2.0f;  // 中間点の係数
+            // UV座標の中間点のアルファ値を取得
+            Vector2 midUV = Vector2.Lerp(uv1, uv2, t);
+            float midAlpha = SampleAlpha(mask, midUV);
+
+            // 境界条件に応じて探索範囲を狭める
+            if ((alpha1 < alphaThreshold && midAlpha > alphaThreshold) || (alpha1 > alphaThreshold && midAlpha < alphaThreshold))
+            {
+                tMax = t; // 境界があると考えられる範囲を左側に絞り込む
+            }
+            else
+            {
+                tMin = t; // 境界があると考えられる範囲を右側に絞り込む
+                alpha1 = midAlpha;
+            }
+        }
+
+        // 最終的な境界点の重みを返す
+        float weight = (tMin + tMax) / 2.0f;
+        return weight;
     }
 }
 

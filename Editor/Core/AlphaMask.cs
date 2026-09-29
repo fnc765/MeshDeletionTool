@@ -17,9 +17,6 @@ namespace MeshDeletionTool
         // アルファ値（0〜255）。下の行から順に Width 個ずつ（GetPixels32 と同じ並び）
         private readonly byte[] alpha;
 
-        // 診断用: 参照したテクセルの数
-        public long SampleCount;
-
         // アルファ値の配列そのもの（GetPixels32 と同じ並び）。処理段のバックエンドがまとめて参照・転送するためのもので、変更しないこと
         public byte[] AlphaBytes => alpha;
 
@@ -55,29 +52,10 @@ namespace MeshDeletionTool
 
         public byte AlphaByte(int x, int y)
         {
-            SampleCount++;
             if (x < 0 || x >= Width)
                 x = Wrap(x, Width, WrapModeU);
             if (y < 0 || y >= Height)
                 y = Wrap(y, Height, WrapModeV);
-            return alpha[y * Width + x];
-        }
-
-        // アルファ値（0〜255）ごとに「alphaThreshold 以上（不透明）か」を表す 256 個の表
-        // 多数のテクセルを判定するとき、テクセル毎の Alpha(x, y) >= alphaThreshold と同じ結果をバイト値の参照だけで得る
-        public bool[] BuildOpaqueTable(float alphaThreshold)
-        {
-            bool[] table = new bool[256];
-            for (int value = 0; value < 256; value++)
-            {
-                table[value] = value / 255f >= alphaThreshold;
-            }
-            return table;
-        }
-
-        // 範囲内のテクセル座標のアルファ値（0〜255）。範囲外の判定を省いた内側のループ用（x, y は範囲内であること）
-        public byte AlphaByteUnchecked(int x, int y)
-        {
             return alpha[y * Width + x];
         }
 
@@ -118,67 +96,6 @@ namespace MeshDeletionTool
                 default:
                     return ((i % size) + size) % size;
             }
-        }
-    }
-
-    // UV座標が示すテクセルのアルファ値の判定（削除処理・細分化・辺上の境界点の二分探索で共用）
-    public static class AlphaSampling
-    {
-        // UV座標が示すテクセルのアルファ値
-        public static float SampleAlpha(AlphaMask mask, Vector2 uv)
-        {
-            return mask.AlphaAt(uv);
-        }
-
-        // UV座標が示すテクセルが透明（削除対象）かどうか
-        public static bool IsTransparent(AlphaMask mask, Vector2 uv, float alphaThreshold)
-        {
-            return SampleAlpha(mask, uv) < alphaThreshold;
-        }
-
-        // UV座標が示すテクスチャのピクセルが境界エッジかどうかを判定する関数
-        public static bool IsBoundaryEdge(AlphaMask mask, Vector2 uv1, Vector2 uv2, float alphaThreshold)
-        {
-            // 両端点のピクセルのアルファ値を取得
-            float alpha1 = SampleAlpha(mask, uv1);
-            float alpha2 = SampleAlpha(mask, uv2);
-
-            // 片方のピクセルが透明で、もう片方が透明でない場合は境界エッジとする
-            return (alpha1 < alphaThreshold && alpha2 > alphaThreshold) || (alpha1 > alphaThreshold && alpha2 < alphaThreshold);
-        }
-
-        // テクスチャのアルファ値に基づき、エッジ上の境界点のUV座標の補完用重みを求める
-        public static float FindAlphaBoundary(AlphaMask mask, Vector2 uv1, Vector2 uv2, float alphaThreshold)
-        {
-            // 開始点のアルファ値を取得
-            float alpha1 = SampleAlpha(mask, uv1);
-
-            float tMin = 0.0f;
-            float tMax = 1.0f;
-
-            // 二分探索を用いて境界点を探す
-            for (int i = 0; i < 10; i++)
-            {
-                float t = (tMin + tMax) / 2.0f;  // 中間点の係数
-                // UV座標の中間点のアルファ値を取得
-                Vector2 midUV = Vector2.Lerp(uv1, uv2, t);
-                float midAlpha = SampleAlpha(mask, midUV);
-
-                // 境界条件に応じて探索範囲を狭める
-                if ((alpha1 < alphaThreshold && midAlpha > alphaThreshold) || (alpha1 > alphaThreshold && midAlpha < alphaThreshold))
-                {
-                    tMax = t; // 境界があると考えられる範囲を左側に絞り込む
-                }
-                else
-                {
-                    tMin = t; // 境界があると考えられる範囲を右側に絞り込む
-                    alpha1 = midAlpha;
-                }
-            }
-
-            // 最終的な境界点の重みを返す
-            float weight = (tMin + tMax) / 2.0f;
-            return weight;
         }
     }
 }

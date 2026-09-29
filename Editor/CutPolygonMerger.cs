@@ -722,6 +722,14 @@ namespace MeshDeletionTool
             if (uv3 != null) mergedMesh.SetUVs(2, uv3);
             List<Vector2> uv4 = Compact(cutMesh.uv4, newIndex, newVertexCount);
             if (uv4 != null) mergedMesh.SetUVs(3, uv4);
+            List<Vector2> uv5 = Compact(cutMesh.uv5, newIndex, newVertexCount);
+            if (uv5 != null) mergedMesh.SetUVs(4, uv5);
+            List<Vector2> uv6 = Compact(cutMesh.uv6, newIndex, newVertexCount);
+            if (uv6 != null) mergedMesh.SetUVs(5, uv6);
+            List<Vector2> uv7 = Compact(cutMesh.uv7, newIndex, newVertexCount);
+            if (uv7 != null) mergedMesh.SetUVs(6, uv7);
+            List<Vector2> uv8 = Compact(cutMesh.uv8, newIndex, newVertexCount);
+            if (uv8 != null) mergedMesh.SetUVs(7, uv8);
             List<Color> colors = Compact(cutMesh.colors, newIndex, newVertexCount);
             if (colors != null) mergedMesh.SetColors(colors);
             List<BoneWeight> boneWeights = Compact(cutMesh.boneWeights, newIndex, newVertexCount);

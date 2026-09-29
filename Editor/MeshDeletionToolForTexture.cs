@@ -594,6 +594,10 @@ namespace MeshDeletionTool
                 newMesh.SetUVs(1, newMeshData.UV2.ToList());
                 newMesh.SetUVs(2, newMeshData.UV3.ToList());
                 newMesh.SetUVs(3, newMeshData.UV4.ToList());
+                newMesh.SetUVs(4, newMeshData.UV5.ToList());
+                newMesh.SetUVs(5, newMeshData.UV6.ToList());
+                newMesh.SetUVs(6, newMeshData.UV7.ToList());
+                newMesh.SetUVs(7, newMeshData.UV8.ToList());
                 newMesh.SetColors(newMeshData.Colors.ToList());
                 newMesh.SetColors(newMeshData.Colors32.ToList());
                 newMesh.boneWeights = newMeshData.BoneWeights.ToArray();
@@ -784,6 +788,14 @@ namespace MeshDeletionTool
                 newMeshDataVertex.UV3.Add(Vector2.Lerp(originalMesh.uv3[indexs[0]], originalMesh.uv3[indexs[1]], weight));
             if (indexs[0] < originalMesh.uv4.Length && indexs[1] < originalMesh.uv4.Length)
                 newMeshDataVertex.UV4.Add(Vector2.Lerp(originalMesh.uv4[indexs[0]], originalMesh.uv4[indexs[1]], weight));
+            if (indexs[0] < originalMesh.uv5.Length && indexs[1] < originalMesh.uv5.Length)
+                newMeshDataVertex.UV5.Add(Vector2.Lerp(originalMesh.uv5[indexs[0]], originalMesh.uv5[indexs[1]], weight));
+            if (indexs[0] < originalMesh.uv6.Length && indexs[1] < originalMesh.uv6.Length)
+                newMeshDataVertex.UV6.Add(Vector2.Lerp(originalMesh.uv6[indexs[0]], originalMesh.uv6[indexs[1]], weight));
+            if (indexs[0] < originalMesh.uv7.Length && indexs[1] < originalMesh.uv7.Length)
+                newMeshDataVertex.UV7.Add(Vector2.Lerp(originalMesh.uv7[indexs[0]], originalMesh.uv7[indexs[1]], weight));
+            if (indexs[0] < originalMesh.uv8.Length && indexs[1] < originalMesh.uv8.Length)
+                newMeshDataVertex.UV8.Add(Vector2.Lerp(originalMesh.uv8[indexs[0]], originalMesh.uv8[indexs[1]], weight));
             
             if (indexs[0] < originalMesh.colors.Length && indexs[1] < originalMesh.colors.Length)
                 newMeshDataVertex.Colors.Add(Color.Lerp(originalMesh.colors[indexs[0]], originalMesh.colors[indexs[1]], weight));
@@ -909,18 +921,17 @@ namespace MeshDeletionTool
                         frameTangentsList.RemoveAt(index);
                     }
 
-                    // 補完処理の追加
-                    foreach (var kvp in blendShapeInterpolation)
+                    // 補完処理の追加（新規頂点は頂点インデックスの順に並べる。差分値なので正規化はしない）
+                    foreach (var kvp in blendShapeInterpolation.OrderBy(kvp => kvp.Key))
                     {
-                        int newIndex = kvp.Key;
                         (int indexA, int indexB, float weight) = kvp.Value;
 
                         // 頂点の補完
                         frameVerticesList.Add(Vector3.Lerp(frameVertices[indexA], frameVertices[indexB], weight));
                         // 法線の補完
-                        frameNormalsList.Add(Vector3.Lerp(frameNormals[indexA], frameNormals[indexB], weight).normalized);
+                        frameNormalsList.Add(Vector3.Lerp(frameNormals[indexA], frameNormals[indexB], weight));
                         // 接線の補完
-                        frameTangentsList.Add(Vector3.Lerp(frameTangents[indexA], frameTangents[indexB], weight).normalized);
+                        frameTangentsList.Add(Vector3.Lerp(frameTangents[indexA], frameTangents[indexB], weight));
                     }
 
                     // 新しいメッシュにブレンドシェイプのフレームを追加

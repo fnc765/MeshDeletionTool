@@ -75,6 +75,10 @@ namespace MeshDeletionTool
                 uv2 = newMeshData.UV2.ToArray(),
                 uv3 = newMeshData.UV3.ToArray(),
                 uv4 = newMeshData.UV4.ToArray(),
+                uv5 = newMeshData.UV5.ToArray(),
+                uv6 = newMeshData.UV6.ToArray(),
+                uv7 = newMeshData.UV7.ToArray(),
+                uv8 = newMeshData.UV8.ToArray(),
                 colors = newMeshData.Colors.ToArray(),
                 colors32 = newMeshData.Colors32.ToArray(),
                 boneWeights = newMeshData.BoneWeights.ToArray(),
@@ -123,6 +127,14 @@ namespace MeshDeletionTool
                     newMeshData.UV3.Add(originalMesh.uv3[index]);
                 if (index < originalMesh.uv4.Length)
                     newMeshData.UV4.Add(originalMesh.uv4[index]);
+                if (index < originalMesh.uv5.Length)
+                    newMeshData.UV5.Add(originalMesh.uv5[index]);
+                if (index < originalMesh.uv6.Length)
+                    newMeshData.UV6.Add(originalMesh.uv6[index]);
+                if (index < originalMesh.uv7.Length)
+                    newMeshData.UV7.Add(originalMesh.uv7[index]);
+                if (index < originalMesh.uv8.Length)
+                    newMeshData.UV8.Add(originalMesh.uv8[index]);
 
                 if (index < originalMesh.colors.Length)
                     newMeshData.Colors.Add(originalMesh.colors[index]);
@@ -290,6 +302,10 @@ namespace MeshDeletionTool
             public List<Vector2> UV2 { get; set; } = new List<Vector2>();
             public List<Vector2> UV3 { get; set; } = new List<Vector2>();
             public List<Vector2> UV4 { get; set; } = new List<Vector2>();
+            public List<Vector2> UV5 { get; set; } = new List<Vector2>();
+            public List<Vector2> UV6 { get; set; } = new List<Vector2>();
+            public List<Vector2> UV7 { get; set; } = new List<Vector2>();
+            public List<Vector2> UV8 { get; set; } = new List<Vector2>();
             public List<Color> Colors { get; set; } = new List<Color>();
             public List<Color32> Colors32 { get; set; } = new List<Color32>();
             public List<BoneWeight> BoneWeights { get; set; } = new List<BoneWeight>();
@@ -335,6 +351,26 @@ namespace MeshDeletionTool
                 if (meshData.UV4 != null && meshData.UV4.Count > 0)
                 {
                     this.UV4.AddRange(meshData.UV4);
+                }
+
+                if (meshData.UV5 != null && meshData.UV5.Count > 0)
+                {
+                    this.UV5.AddRange(meshData.UV5);
+                }
+
+                if (meshData.UV6 != null && meshData.UV6.Count > 0)
+                {
+                    this.UV6.AddRange(meshData.UV6);
+                }
+
+                if (meshData.UV7 != null && meshData.UV7.Count > 0)
+                {
+                    this.UV7.AddRange(meshData.UV7);
+                }
+
+                if (meshData.UV8 != null && meshData.UV8.Count > 0)
+                {
+                    this.UV8.AddRange(meshData.UV8);
                 }
 
                 if (meshData.Colors != null && meshData.Colors.Count > 0)
@@ -390,6 +426,22 @@ namespace MeshDeletionTool
                 {
                     result.UV4.Add(UV4[index]);
                 }
+                if (index < UV5.Count)
+                {
+                    result.UV5.Add(UV5[index]);
+                }
+                if (index < UV6.Count)
+                {
+                    result.UV6.Add(UV6[index]);
+                }
+                if (index < UV7.Count)
+                {
+                    result.UV7.Add(UV7[index]);
+                }
+                if (index < UV8.Count)
+                {
+                    result.UV8.Add(UV8[index]);
+                }
                 if (index < Colors.Count)
                 {
                     result.Colors.Add(Colors[index]);
@@ -443,6 +495,22 @@ namespace MeshDeletionTool
                     if (mesh.uv4.Length > index)
                     {
                         UV4.Add(mesh.uv4[index]);
+                    }
+                    if (mesh.uv5.Length > index)
+                    {
+                        UV5.Add(mesh.uv5[index]);
+                    }
+                    if (mesh.uv6.Length > index)
+                    {
+                        UV6.Add(mesh.uv6[index]);
+                    }
+                    if (mesh.uv7.Length > index)
+                    {
+                        UV7.Add(mesh.uv7[index]);
+                    }
+                    if (mesh.uv8.Length > index)
+                    {
+                        UV8.Add(mesh.uv8[index]);
                     }
                     if (mesh.colors.Length > index)
                     {

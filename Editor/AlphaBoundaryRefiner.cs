@@ -298,6 +298,10 @@ namespace MeshDeletionTool
             List<Vector2> uv2 = new List<Vector2>(mesh.uv2);
             List<Vector2> uv3 = new List<Vector2>(mesh.uv3);
             List<Vector2> uv4 = new List<Vector2>(mesh.uv4);
+            List<Vector2> uv5 = new List<Vector2>(mesh.uv5);
+            List<Vector2> uv6 = new List<Vector2>(mesh.uv6);
+            List<Vector2> uv7 = new List<Vector2>(mesh.uv7);
+            List<Vector2> uv8 = new List<Vector2>(mesh.uv8);
             List<Color> colors = new List<Color>(mesh.colors);
             List<BoneWeight> boneWeights = new List<BoneWeight>(mesh.boneWeights);
 
@@ -308,7 +312,7 @@ namespace MeshDeletionTool
             foreach ((int indexA, int indexB) in edges)
             {
                 midpointIndexMap[(indexA, indexB)] = vertices.Count;
-                AddMidpointVertex(indexA, indexB, vertices, normals, tangents, uv, uv2, uv3, uv4, colors, boneWeights);
+                AddMidpointVertex(indexA, indexB, vertices, normals, tangents, uv, uv2, uv3, uv4, uv5, uv6, uv7, uv8, colors, boneWeights);
             }
 
             Mesh refinedMesh = new Mesh();
@@ -321,6 +325,10 @@ namespace MeshDeletionTool
             if (uv2.Count > 0) refinedMesh.SetUVs(1, uv2);
             if (uv3.Count > 0) refinedMesh.SetUVs(2, uv3);
             if (uv4.Count > 0) refinedMesh.SetUVs(3, uv4);
+            if (uv5.Count > 0) refinedMesh.SetUVs(4, uv5);
+            if (uv6.Count > 0) refinedMesh.SetUVs(5, uv6);
+            if (uv7.Count > 0) refinedMesh.SetUVs(6, uv7);
+            if (uv8.Count > 0) refinedMesh.SetUVs(7, uv8);
             if (colors.Count > 0) refinedMesh.SetColors(colors);
             if (boneWeights.Count > 0) refinedMesh.boneWeights = boneWeights.ToArray();
             refinedMesh.bindposes = mesh.bindposes;
@@ -356,6 +364,7 @@ namespace MeshDeletionTool
         private static void AddMidpointVertex(int indexA, int indexB,
                                               List<Vector3> vertices, List<Vector3> normals, List<Vector4> tangents,
                                               List<Vector2> uv, List<Vector2> uv2, List<Vector2> uv3, List<Vector2> uv4,
+                                              List<Vector2> uv5, List<Vector2> uv6, List<Vector2> uv7, List<Vector2> uv8,
                                               List<Color> colors, List<BoneWeight> boneWeights)
         {
             vertices.Add(Vector3.Lerp(vertices[indexA], vertices[indexB], 0.5f));
@@ -377,6 +386,14 @@ namespace MeshDeletionTool
                 uv3.Add(Vector2.Lerp(uv3[indexA], uv3[indexB], 0.5f));
             if (uv4.Count > 0)
                 uv4.Add(Vector2.Lerp(uv4[indexA], uv4[indexB], 0.5f));
+            if (uv5.Count > 0)
+                uv5.Add(Vector2.Lerp(uv5[indexA], uv5[indexB], 0.5f));
+            if (uv6.Count > 0)
+                uv6.Add(Vector2.Lerp(uv6[indexA], uv6[indexB], 0.5f));
+            if (uv7.Count > 0)
+                uv7.Add(Vector2.Lerp(uv7[indexA], uv7[indexB], 0.5f));
+            if (uv8.Count > 0)
+                uv8.Add(Vector2.Lerp(uv8[indexA], uv8[indexB], 0.5f));
             if (colors.Count > 0)
                 colors.Add(Color.Lerp(colors[indexA], colors[indexB], 0.5f));
             if (boneWeights.Count > 0)

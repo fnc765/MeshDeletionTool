@@ -85,4 +85,19 @@ public class AlphaMeshDeletionPipelineTest
         Assert.AreEqual(mesh.VertexCount, result.VertexCount);
         Assert.AreEqual(mesh.TriangleCount, result.TriangleCount);
     }
+
+    // 対象になっていてもマスク（テクスチャ）の無いサブメッシュは対象外として扱う（テクスチャの無いサブメッシュにチェックが入っていても壊れない）
+    [Test]
+    public void Run_TargetSubMeshWithoutMask_IsTreatedAsNonTarget()
+    {
+        MeshArrays mesh = MeshCoreTestUtils.Grid(4);
+        AlphaMask mask = MeshCoreTestUtils.LeftTransparent(32, 32);
+        bool[] targets = { true, true };
+        MeshArrays withoutMask = Pipeline(new List<string>(), true).Run(mesh, new AlphaMask[] { null, mask }, targets);
+        MeshArrays nonTarget = Pipeline(new List<string>(), true).Run(mesh, new[] { mask, mask }, new[] { false, true });
+
+        Assert.IsNull(MeshArraysComparer.FirstDifference(nonTarget, withoutMask));
+        Assert.AreEqual(mesh.VertexCount, withoutMask.VertexCount);
+        Assert.AreEqual(new[] { true, true }, targets);   // 呼び出し側の配列は変えない
+    }
 }

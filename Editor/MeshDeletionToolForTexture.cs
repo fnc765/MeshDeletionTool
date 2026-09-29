@@ -334,19 +334,19 @@ namespace MeshDeletionTool
             WarnIfBonesPerVertexExceedFour(originalMesh);
             if (targetSubMeshes == null)
             {
-                targetSubMeshes = new bool[originalMesh.subMeshCount];
-                for (int subMeshIndex = 0; subMeshIndex < targetSubMeshes.Length; subMeshIndex++)
-                {
-                    Material material = subMeshIndex < originalMaterials.Length ? originalMaterials[subMeshIndex] : null;
-                    targetSubMeshes[subMeshIndex] = material != null && material.mainTexture is Texture2D;
-                }
+                targetSubMeshes = SubMeshesWithTexture(originalMesh.subMeshCount, originalMaterials);
             }
             else if (targetSubMeshes.Length != originalMesh.subMeshCount)
             {
                 throw new ArgumentException("targetSubMeshes の長さがサブメッシュ数と異なります。", nameof(targetSubMeshes));
             }
+            else
+            {
+                // テクスチャを読めないサブメッシュは対象から外すので、呼び出し側の配列を変えないよう写しを使う
+                targetSubMeshes = (bool[])targetSubMeshes.Clone();
+            }
 
-            // テクスチャのアルファ値とメッシュの頂点属性を一度だけ読み出す
+            // テクスチャのアルファ値とメッシュの頂点属性を一度だけ読み出す（テクスチャを読めないサブメッシュは処理対象から外れる）
             AlphaMask[] subMeshMasks = CollectAlphaMasks(originalMesh.subMeshCount, originalMaterials, targetSubMeshes);
             MeshArrays sourceArrays = MeshArraysUnityAdapter.FromMesh(originalMesh);
 
@@ -389,10 +389,24 @@ namespace MeshDeletionTool
             return targets;
         }
 
+        // メインテクスチャ（Texture2D）を持つサブメッシュを処理対象にしたフラグ（マテリアルの数がサブメッシュ数より少ない・空のスロットは対象外）
+        internal static bool[] SubMeshesWithTexture(int subMeshCount, Material[] materials)
+        {
+            bool[] targets = new bool[subMeshCount];
+            for (int subMeshIndex = 0; subMeshIndex < subMeshCount; subMeshIndex++)
+            {
+                Material material = subMeshIndex < materials.Length ? materials[subMeshIndex] : null;
+                targets[subMeshIndex] = material != null && material.mainTexture is Texture2D;
+            }
+            return targets;
+        }
+
         // 処理対象サブメッシュのテクスチャのアルファ値の読み出し（対象外のサブメッシュとテクスチャの無いサブメッシュは null）
+        // マテリアルが無い（数が足りない・空のスロット）、テクスチャが無い、テクスチャを読めないサブメッシュは例外にせず、1 行のログを出して
+        // targetSubMeshes から外す（処理本体はテクスチャの無いサブメッシュを対象にできないため、対象と読み出し結果を常に一致させる）
         // Texture2D.GetPixel は呼び出し毎にネイティブ呼び出しになるため、GetPixels32 で一度だけ読む。同じテクスチャは一度だけ読む
         // 読み出す間だけインポート設定を読み取り可能・非圧縮に変更し（圧縮テクスチャのアルファ値は近似値になるため）、読み終えたら元に戻す
-        private static AlphaMask[] CollectAlphaMasks(int subMeshCount, Material[] originalMaterials, bool[] targetSubMeshes)
+        internal static AlphaMask[] CollectAlphaMasks(int subMeshCount, Material[] originalMaterials, bool[] targetSubMeshes)
         {
             Texture2D[] subMeshTextures = new Texture2D[subMeshCount];
             List<Texture2D> distinctTextures = new List<Texture2D>();
@@ -401,9 +415,19 @@ namespace MeshDeletionTool
                 if (!targetSubMeshes[subMeshIndex])
                     continue;
                 Material material = subMeshIndex < originalMaterials.Length ? originalMaterials[subMeshIndex] : null;
-                Texture2D texture = material != null ? material.mainTexture as Texture2D : null;
-                if (texture == null)
+                if (material == null)
+                {
+                    Debug.LogWarning("サブメッシュ " + subMeshIndex + " にはマテリアルが無いため処理対象から外します。");
+                    targetSubMeshes[subMeshIndex] = false;
                     continue;
+                }
+                Texture2D texture = material.mainTexture as Texture2D;
+                if (texture == null)
+                {
+                    Debug.LogWarning("サブメッシュ " + subMeshIndex + " のマテリアル '" + material.name + "' にはテクスチャ（Texture2D）が無いため処理対象から外します。");
+                    targetSubMeshes[subMeshIndex] = false;
+                    continue;
+                }
                 subMeshTextures[subMeshIndex] = texture;
                 if (!distinctTextures.Contains(texture))
                     distinctTextures.Add(texture);
@@ -424,6 +448,8 @@ namespace MeshDeletionTool
                         maskCache[texture] = mask;
                     }
                     subMeshMasks[subMeshIndex] = mask;
+                    if (mask == null)
+                        targetSubMeshes[subMeshIndex] = false;   // 読めなかった理由は TemporaryReadableTextures が出している
                 }
             }
             return subMeshMasks;

@@ -46,9 +46,11 @@ namespace MeshDeletionTool
         public List<int[]> OutputTriangleParents;
 
         // subMeshMasks[i] はサブメッシュ i のテクスチャのアルファ値（テクスチャが無ければ null）、targetSubMeshes[i] は処理対象かどうか
+        // マスクの無いサブメッシュは処理対象にできない（判定のしようがない）ため、対象になっていても対象外として扱う
         public MeshArrays Run(MeshArrays sourceMesh, AlphaMask[] subMeshMasks, bool[] targetSubMeshes)
         {
             MeshArrays originalMesh = sourceMesh;
+            targetSubMeshes = ExcludeSubMeshesWithoutMask(targetSubMeshes, subMeshMasks);
             StageTimings.Clear();
             Stopwatch stopwatch = Stopwatch.StartNew();
 
@@ -79,6 +81,21 @@ namespace MeshDeletionTool
                 RecordStage("再結合", stopwatch);
             }
             return newMesh;
+        }
+
+        // マスクの無いサブメッシュを対象から外したフラグを返す（呼び出し側の配列は変えない。外すものが無ければそのまま返す）
+        private static bool[] ExcludeSubMeshesWithoutMask(bool[] targetSubMeshes, AlphaMask[] subMeshMasks)
+        {
+            bool[] result = targetSubMeshes;
+            for (int subMeshIndex = 0; subMeshIndex < targetSubMeshes.Length; subMeshIndex++)
+            {
+                if (!targetSubMeshes[subMeshIndex] || (subMeshIndex < subMeshMasks.Length && subMeshMasks[subMeshIndex] != null))
+                    continue;
+                if (ReferenceEquals(result, targetSubMeshes))
+                    result = (bool[])targetSubMeshes.Clone();
+                result[subMeshIndex] = false;
+            }
+            return result;
         }
 
         // 直前の記録からの経過時間を処理段の時間として記録し、計測をやり直す

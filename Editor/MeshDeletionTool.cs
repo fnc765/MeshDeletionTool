@@ -68,6 +68,8 @@ namespace MeshDeletionTool
 
             Mesh newMesh = new Mesh
             {
+                // 頂点数が 65,535 を超える場合は 16 ビットのインデックスでは参照できないため 32 ビットにする
+                indexFormat = newMeshData.Vertices.Count > 65535 ? UnityEngine.Rendering.IndexFormat.UInt32 : originalMesh.indexFormat,
                 vertices = newMeshData.Vertices.ToArray(),
                 normals = newMeshData.Normals.ToArray(),
                 tangents = newMeshData.Tangents.ToArray(),

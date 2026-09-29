@@ -488,7 +488,7 @@ namespace MeshDeletionTool
 
             newMesh.subMeshCount = originalMesh.subMeshCount;
             int subMeshCount = originalMesh.subMeshCount;
-            int addSubMeshIndex = 0;
+            List<List<int>> newSubMeshTrianglesList = new List<List<int>>(subMeshCount);
 
             // サブメッシュ毎に三角ポリゴンを処理する
             for (int subMeshIndex = 0; subMeshIndex < subMeshCount; subMeshIndex++)
@@ -587,24 +587,32 @@ namespace MeshDeletionTool
                     }
                 }
                 sourceTriangleIndices.Add(newSubMeshTriangleSources.ToArray());
-                newMesh.SetVertices(newMeshData.Vertices.ToList());
-                newMesh.SetNormals(newMeshData.Normals.ToList());
-                newMesh.SetTangents(newMeshData.Tangents.ToList());
-                newMesh.SetUVs(0, newMeshData.UV.ToList());
-                newMesh.SetUVs(1, newMeshData.UV2.ToList());
-                newMesh.SetUVs(2, newMeshData.UV3.ToList());
-                newMesh.SetUVs(3, newMeshData.UV4.ToList());
-                newMesh.SetUVs(4, newMeshData.UV5.ToList());
-                newMesh.SetUVs(5, newMeshData.UV6.ToList());
-                newMesh.SetUVs(6, newMeshData.UV7.ToList());
-                newMesh.SetUVs(7, newMeshData.UV8.ToList());
-                newMesh.SetColors(newMeshData.Colors.ToList());
-                newMesh.SetColors(newMeshData.Colors32.ToList());
-                newMesh.boneWeights = newMeshData.BoneWeights.ToArray();
-                newMesh.SetTriangles(newSubMeshTriangles, addSubMeshIndex++);
+                newSubMeshTrianglesList.Add(newSubMeshTriangles);
             }
 
-            newMesh.subMeshCount = addSubMeshIndex;
+            // 全サブメッシュの頂点が出揃ってから頂点属性と三角形を設定する
+            // （頂点数が 65,535 を超える場合は 16 ビットのインデックスでは参照できないため 32 ビットにする）
+            newMesh.indexFormat = newMeshData.Vertices.Count > 65535 ? UnityEngine.Rendering.IndexFormat.UInt32 : originalMesh.indexFormat;
+            newMesh.SetVertices(newMeshData.Vertices.ToList());
+            newMesh.SetNormals(newMeshData.Normals.ToList());
+            newMesh.SetTangents(newMeshData.Tangents.ToList());
+            newMesh.SetUVs(0, newMeshData.UV.ToList());
+            newMesh.SetUVs(1, newMeshData.UV2.ToList());
+            newMesh.SetUVs(2, newMeshData.UV3.ToList());
+            newMesh.SetUVs(3, newMeshData.UV4.ToList());
+            newMesh.SetUVs(4, newMeshData.UV5.ToList());
+            newMesh.SetUVs(5, newMeshData.UV6.ToList());
+            newMesh.SetUVs(6, newMeshData.UV7.ToList());
+            newMesh.SetUVs(7, newMeshData.UV8.ToList());
+            newMesh.SetColors(newMeshData.Colors.ToList());
+            newMesh.SetColors(newMeshData.Colors32.ToList());
+            newMesh.boneWeights = newMeshData.BoneWeights.ToArray();
+            for (int subMeshIndex = 0; subMeshIndex < subMeshCount; subMeshIndex++)
+            {
+                newMesh.SetTriangles(newSubMeshTrianglesList[subMeshIndex], subMeshIndex);
+            }
+
+            newMesh.subMeshCount = subMeshCount;
             newMesh.bindposes = originalMesh.bindposes;
 
             CompletionBlendShapes(originalMesh, removeVerticesIndexs, newMesh, vertexInterpolation);

@@ -5,17 +5,24 @@ using System.Collections.Generic;
 namespace MeshDeletionTool
 {
     // テクスチャのアルファ境界付近の三角形を、削除処理の前に細分化するクラス
-    // 既存の削除処理は「頂点UVのアルファ値」だけで削除を判定するため、
-    // 3頂点とも透明だが内部に不透明テクセルを含む三角形は丸ごと削除されてしまう。
-    // 本クラスはそのような三角形を辺の中点で分割（赤緑細分化）し、細分化済みのメッシュを返す。
+    // 既存の削除処理は「頂点UVのアルファ値」だけで削除を判定し、新しい頂点を「既存の辺上」にしか追加できないため、
+    //   1. 3頂点とも透明だが内部に不透明テクセルを含む三角形は丸ごと削除され、
+    //   2. 一部が削除される三角形は2つの境界点を結ぶ直線で切られ、不透明部分の膨らみが削り取られる。
+    // 本クラスはこれらに該当する三角形を辺の中点で分割（赤緑細分化）し、細分化済みのメッシュを返す。
     // 隣接する三角形も分割された辺に合わせて再分割するため、隙間（T字接合）は生じない。
     public class AlphaBoundaryRefiner
     {
         // 細分化の最大深さ（0で無効）
         public int MaxDepth = 3;
 
-        // 3頂点とも透明で内部に不透明テクセルを含む三角形を細分化する
+        // 修正1: 3頂点とも透明で内部に不透明テクセルを含む三角形を細分化する
         public bool RefineFullyTransparentTriangles = true;
+
+        // 修正2: 直線で切ると不透明テクセルが失われる三角形（一部の頂点が透明）を細分化する
+        public bool RefinePartiallyCutTriangles = true;
+
+        // 修正2で許容する、失われる不透明テクセル数（0で厳密）
+        public int ChordToleranceTexels = 0;
 
         // ラスタライズするバウンディングボックスの上限（テクセル）。超える場合は間引いてサンプリングする
         public int MaxRasterSize = 512;
@@ -98,13 +105,44 @@ namespace MeshDeletionTool
             };
             int transparentCount = (transparent[0] ? 1 : 0) + (transparent[1] ? 1 : 0) + (transparent[2] ? 1 : 0);
 
-            // 3頂点とも透明: 内部に不透明テクセルがあれば細分化する
+            // 3頂点とも透明: 内部に不透明テクセルがあれば細分化する（修正1）
             if (transparentCount == 3)
             {
                 return RefineFullyTransparentTriangles && CountOpaqueTexels(texture, uv, alphaThreshold, 1) > 0;
             }
-            // それ以外（全て不透明、または一部が透明）は既存処理に任せる
-            return false;
+            // 3頂点とも不透明: 既存処理でそのまま残るため対象外
+            if (transparentCount == 0)
+            {
+                return false;
+            }
+            // 一部の頂点が透明: 既存処理で削除される側の多角形に不透明テクセルが含まれていれば細分化する（修正2）
+            if (!RefinePartiallyCutTriangles)
+            {
+                return false;
+            }
+            List<Vector2> removedPolygon = BuildRemovedPolygon(texture, uv, transparent, alphaThreshold);
+            return CountOpaqueTexels(texture, removedPolygon, alphaThreshold, ChordToleranceTexels + 1) > ChordToleranceTexels;
+        }
+
+        // 既存処理と同じ境界点（辺上の二分探索）を使い、三角形のうち削除される側の多角形（UV座標、外周順）を作る
+        private static List<Vector2> BuildRemovedPolygon(Texture2D texture, Vector2[] uv, bool[] transparent, float alphaThreshold)
+        {
+            List<Vector2> polygon = new List<Vector2>(4);
+            for (int i = 0; i < 3; i++)
+            {
+                int j = (i + 1) % 3;
+                if (transparent[i])
+                {
+                    polygon.Add(uv[i]);
+                }
+                // 辺の向きも既存処理（辺 (0,1), (1,2), (2,0)）と同じにして同一の境界点を得る
+                if (MeshDeletionToolForTexture.IsBoundaryEdge(texture, uv[i], uv[j], alphaThreshold))
+                {
+                    float weight = MeshDeletionToolForTexture.FindAlphaBoundary(texture, uv[i], uv[j], alphaThreshold);
+                    polygon.Add(Vector2.Lerp(uv[i], uv[j], weight));
+                }
+            }
+            return polygon;
         }
 
         // UV座標が示すテクセルのアルファ値を取得する（既存処理と同じテクセル座標の求め方）

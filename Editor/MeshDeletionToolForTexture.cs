@@ -23,6 +23,10 @@ namespace MeshDeletionTool
         // 細分化の最大深さ
         private int refineMaxDepth = 3;
 
+        // （GUI非公開）一部の頂点が透明な三角形の細分化（修正2）と、その際に許容する失われる不透明テクセル数
+        private bool refinePartiallyCutTriangles = true;
+        private int refineChordToleranceTexels = 0;
+
         // メニューアイテムからツールを初期化してウィンドウを表示するメソッド
         [MenuItem("Tools/MeshDeletionToolForTexture")]
         private static void Init()
@@ -180,7 +184,12 @@ namespace MeshDeletionTool
                 subMeshTextures[subMeshIndex] = texture;
             }
 
-            AlphaBoundaryRefiner refiner = new AlphaBoundaryRefiner { MaxDepth = refineMaxDepth };
+            AlphaBoundaryRefiner refiner = new AlphaBoundaryRefiner
+            {
+                MaxDepth = refineMaxDepth,
+                RefinePartiallyCutTriangles = refinePartiallyCutTriangles,
+                ChordToleranceTexels = refineChordToleranceTexels
+            };
             Mesh refinedMesh = refiner.Refine(originalMesh, subMeshTextures, alphaThreshold);
             Debug.Log("境界の細分化: 三角形 " + originalMesh.triangles.Length / 3 + " → " + refinedMesh.triangles.Length / 3 +
                       " (深さ毎の三角形数: " + string.Join(", ", refiner.TriangleCountPerDepth) + ")");
@@ -510,6 +519,12 @@ namespace MeshDeletionTool
         // UV座標が示すテクスチャのピクセルが境界エッジかどうかを判定する関数
         private bool IsBoundaryEdge(Texture2D texture, Vector2 uv1, Vector2 uv2)
         {
+            return IsBoundaryEdge(texture, uv1, uv2, alphaThreshold);
+        }
+
+        // UV座標が示すテクスチャのピクセルが境界エッジかどうかを判定する関数（細分化処理と共用）
+        internal static bool IsBoundaryEdge(Texture2D texture, Vector2 uv1, Vector2 uv2, float alphaThreshold)
+        {
             // UV座標をピクセル座標に変換
             Vector2 pixelUV1 = new Vector2(uv1.x * (texture.width - 1), uv1.y * (texture.height - 1));
             Vector2 pixelUV2 = new Vector2(uv2.x * (texture.width - 1), uv2.y * (texture.height - 1));
@@ -525,8 +540,12 @@ namespace MeshDeletionTool
         // テクスチャのアルファ値に基づき、エッジ上の境界点のUV座標の補完用重みを求める
         private float FindAlphaBoundary(Mesh originalMesh, Texture2D texture, int[] indexs)
         {
-            Vector2 uv1 = originalMesh.uv[indexs[0]];
-            Vector2 uv2 = originalMesh.uv[indexs[1]];
+            return FindAlphaBoundary(texture, originalMesh.uv[indexs[0]], originalMesh.uv[indexs[1]], alphaThreshold);
+        }
+
+        // テクスチャのアルファ値に基づき、エッジ上の境界点のUV座標の補完用重みを求める（細分化処理と共用）
+        internal static float FindAlphaBoundary(Texture2D texture, Vector2 uv1, Vector2 uv2, float alphaThreshold)
+        {
             // UV座標をピクセル座標に変換し、開始点の色を取得
             Vector2 pixelUV1 = new Vector2(uv1.x * (texture.width - 1), uv1.y * (texture.height - 1));
             Color color1 = texture.GetPixel((int)pixelUV1.x, (int)pixelUV1.y);

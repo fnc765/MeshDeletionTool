@@ -41,9 +41,6 @@ namespace MeshDeletionTool
         // 実行結果: サブメッシュ毎の、再結合後の三角形番号 → 元の三角形番号
         public List<int[]> ParentTriangleIndexPerSubMesh;
 
-        // 実行結果（診断用）: 再結合後の頂点番号 → 入力（切断後）メッシュの頂点番号
-        public int[] VertexSourceIndex;
-
         // 切断後のメッシュ cutMesh を再結合したメッシュを返す
         //   parentTriangleIndexPerSubMesh: サブメッシュ毎の、cutMesh の三角形番号 → originalMesh の三角形番号
         //   originalMesh: 細分化前の元のメッシュ（元の三角形の平面を得るために使う）
@@ -708,12 +705,6 @@ namespace MeshDeletionTool
                 }
             }
             VertexCountAfter = newVertexCount;
-            VertexSourceIndex = new int[newVertexCount];
-            for (int i = 0; i < vertexCount; i++)
-            {
-                if (newIndex[i] >= 0)
-                    VertexSourceIndex[newIndex[i]] = i;
-            }
 
             // 出力メッシュ（インデックス形式は元のまま。頂点数が 65,535 を超えれば Mesh 作成時に 32 ビットになる）
             MeshArrays mergedMesh = new MeshArrays();

@@ -6,7 +6,7 @@ using UnityEngine.Rendering;
 
 namespace MeshDeletionTool
 {
-    // テクスチャのアルファ値（AlphaMask）の読み出し。テクスチャツール本体・ヘッドレスの入口・ベンチマークが共通に使う
+    // テクスチャのアルファ値（AlphaMask）の読み出し。テクスチャツール本体とヘッドレスの入口が共通に使う
     // 基本は GPU 経由: Texture2D を同じ大きさの RenderTexture に Blit し、ReadPixels で CPU に読み戻す。テクスチャが読み取り可能（isReadable）で
     // なくてもよく、インポート設定には触れない（再インポートしない）。圧縮テクスチャ（BC3/DXT5 など）のアルファ値は GPU が展開した値、
     // つまり描画に使われている値そのものになる（PNG のアルファ値と厳密に一致させたいときはテクスチャ側で非圧縮にする）

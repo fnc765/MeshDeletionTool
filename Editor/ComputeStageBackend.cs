@@ -10,7 +10,7 @@ namespace MeshDeletionTool
     // 処理段を Compute Shader（Editor/Shaders/MeshDeletionStages.compute）で実行するバックエンド
     // 入力の平坦化は CpuStageBackend と同じ StageBatch で行い、カーネルの数式は StageKernelContext と行単位で対応しているため、結果は CPU と同じになる。
     // マスク（アルファ値）は 1 回の処理の間キャッシュして GPU に一度だけ転送する。読み戻しは同期（GetData）で、エディタ拡張には十分
-    public class ComputeStageBackend : IAlphaStageBackend, IBisectionTracer
+    public class ComputeStageBackend : IAlphaStageBackend
     {
         public const string ShaderAssetName = "MeshDeletionStages";
         private const int Threads = 64;
@@ -19,8 +19,6 @@ namespace MeshDeletionTool
 
         private readonly ComputeShader shader;
         private readonly int classifyKernel, refineKernel, bisectKernel;
-        // 診断用のカーネル（無くても通常の処理はできる）
-        private readonly int traceKernel = -1;
 
         // マスクのキャッシュ（連結して 1 つのバッファに詰めたもの）
         private readonly List<AlphaMask> packedMasks = new List<AlphaMask>();
@@ -46,8 +44,6 @@ namespace MeshDeletionTool
             classifyKernel = shader.FindKernel("ClassifyVertices");
             refineKernel = shader.FindKernel("RefineTriangleTest");
             bisectKernel = shader.FindKernel("BisectEdges");
-            if (shader.HasKernel("BisectEdgesTrace"))
-                traceKernel = shader.FindKernel("BisectEdgesTrace");
             alphaClassBuffer = new ComputeBuffer(256, sizeof(uint));
             dummyBuffer = new ComputeBuffer(1, sizeof(uint));
         }
@@ -178,37 +174,6 @@ namespace MeshDeletionTool
             }
             isBoundary = StageBatch.SplitFlags(flags, edgeSets, 2, setOffsets);
             weights = StageBatch.SplitWeights(weightValues, edgeSets, 2, setOffsets);
-        }
-
-        // 診断用: 1 本の辺の二分探索を BisectEdgesTrace カーネルで実行し、途中経過（BisectionTrace の並び）を返す
-        public uint[] TraceBisection(Vector2 uvA, Vector2 uvB, AlphaMask mask, float alphaThreshold, out string reason)
-        {
-            if (traceKernel < 0)
-            {
-                reason = "Compute Shader '" + ShaderAssetName + "' に BisectEdgesTrace カーネルが無い（古い .compute かコンパイルエラー）";
-                return null;
-            }
-            reason = null;
-            int[] maskIndexInPack = EnsureMasks(new[] { mask });
-            EnsureUV(new[] { uvA, uvB });
-            EnsureAlphaClass(alphaThreshold);
-            uint[] trace = new uint[BisectionTrace.Words];
-            using (ComputeBuffer itemBuffer = new ComputeBuffer(2, sizeof(int)))
-            using (ComputeBuffer itemMaskBuffer = new ComputeBuffer(1, sizeof(int)))
-            using (ComputeBuffer outFlags = new ComputeBuffer(1, sizeof(int)))
-            using (ComputeBuffer outWeights = new ComputeBuffer(1, sizeof(float)))
-            using (ComputeBuffer outTrace = new ComputeBuffer(BisectionTrace.Words, sizeof(uint)))
-            {
-                itemBuffer.SetData(new[] { 0, 1 });
-                itemMaskBuffer.SetData(maskIndexInPack);
-                shader.SetInt("_VertexCount", 2);
-                shader.SetFloat("_One", 1f);
-                Bind(traceKernel, itemBuffer, itemMaskBuffer, outFlags, outWeights);
-                shader.SetBuffer(traceKernel, "_OutTrace", outTrace);
-                Dispatch(traceKernel, 1);
-                outTrace.GetData(trace);
-            }
-            return trace;
         }
 
         public void ResetTimings()

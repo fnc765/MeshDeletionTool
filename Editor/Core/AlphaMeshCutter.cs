@@ -20,13 +20,6 @@ namespace MeshDeletionTool
             set => backend = value;
         }
 
-        // 実行結果（診断用。Cut の後に読める）: 入力メッシュの頂点毎の削除フラグ、残した頂点数（出力の先頭にこの数だけ入力の頂点が番号の昇順で並ぶ）、
-        // 追加した境界点の頂点番号 → (親の辺の両端の頂点番号（昇順）, 重み)、境界点の頂点番号 → 二分探索に使ったマスクのサブメッシュ番号
-        public bool[] LastIsRemoved;
-        public int LastKeptVertexCount;
-        public Dictionary<int, (int, int, float)> LastVertexInterpolation;
-        public Dictionary<int, int> LastBoundaryVertexSubMesh;
-
         // テクスチャに基づいて削除すべき頂点のインデックスを取得するメソッド（降順）
         public List<int> GetVerticesToRemove(MeshArrays originalMesh, AlphaMask[] subMeshMasks)
         {
@@ -91,7 +84,6 @@ namespace MeshDeletionTool
 
             // 新規追加頂点を補完するための２点頂点インデックスと重みを、新規頂点インデックスをキーとして保持
             Dictionary<int, (int, int, float)> vertexInterpolation = new Dictionary<int, (int, int, float)>();
-            Dictionary<int, int> boundaryVertexSubMesh = new Dictionary<int, int>();
 
             // 出力メッシュ（new Mesh() と同じく名前は空。インデックス形式は元のまま、頂点数が 65,535 を超えれば Mesh 作成時に 32 ビットになる）
             MeshArrays newMesh = new MeshArrays { IndexFormat = originalMesh.IndexFormat };
@@ -197,7 +189,7 @@ namespace MeshDeletionTool
                             // 追加頂点の中で重複が無いように全体メッシュへ頂点を追加する（既存頂点はシームなどで重複がある）
                             // シェイプキー用補完重みも同様に重複を排除する
                             addUniqueMeshData(addMeshData, newMeshData, polygonToGlobalIndexMap, edgeVertexIndexMap,
-                                            localVertexInterpolation, vertexInterpolation, boundaryVertexSubMesh, subMeshIndex);
+                                            localVertexInterpolation, vertexInterpolation);
 
                             // 処理対象の多角形の外形頂点としてまとめる（残す頂点、辺上の新規頂点の順）
                             List<Vector3> polygonVertices = new List<Vector3>();
@@ -255,10 +247,6 @@ namespace MeshDeletionTool
 
             CompletionBlendShapes(originalMesh, isRemoved, keptVertexCount, newMesh, vertexInterpolation);
 
-            LastIsRemoved = isRemoved;
-            LastKeptVertexCount = keptVertexCount;
-            LastVertexInterpolation = vertexInterpolation;
-            LastBoundaryVertexSubMesh = boundaryVertexSubMesh;
             return newMesh;
         }
 
@@ -476,8 +464,7 @@ namespace MeshDeletionTool
         private void addUniqueMeshData(MeshData addMeshData, MeshData newMeshData, List<int> polygonToGlobalIndexMap,
                                        Dictionary<(int, int), int> edgeVertexIndexMap,
                                        List<(int, int, float)> localVertexInterpolation,
-                                       Dictionary<int, (int, int, float)> vertexInterpolation,
-                                       Dictionary<int, int> boundaryVertexSubMesh, int subMeshIndex)
+                                       Dictionary<int, (int, int, float)> vertexInterpolation)
         {
             for (int j = 0; j < addMeshData.Vertices.Count; j++)
             {
@@ -494,7 +481,6 @@ namespace MeshDeletionTool
                     edgeVertexIndexMap[(indexA, indexB)] = newIndex;
                     polygonToGlobalIndexMap.Add(newIndex);
                     vertexInterpolation.Add(newIndex, (indexA, indexB, weight));
-                    boundaryVertexSubMesh.Add(newIndex, subMeshIndex);
                 }
             }
         }

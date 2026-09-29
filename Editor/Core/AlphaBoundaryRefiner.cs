@@ -36,10 +36,6 @@ namespace MeshDeletionTool
         // 実行結果: サブメッシュ毎の、細分化後の三角形番号 → 元のメッシュの三角形番号（細分化が無ければ恒等）
         public List<int[]> ParentTriangleIndexPerSubMesh = new List<int[]>();
 
-        // 実行結果（診断用）: 追加した中点頂点の親の辺（両端の頂点番号、昇順）。細分化後メッシュの頂点番号 = 元の頂点数 + この並びの番号
-        // （頂点は各深さで末尾に追加されるだけなので、番号は深さをまたいで変わらない）
-        public List<(int A, int B)> MidpointEdges = new List<(int A, int B)>();
-
         // 実行結果（診断用）: 多角形の内部にあるか判定したテクセルの数と、そのうち不透明か判定したテクセルの数
         public long RasterTexelTests;
         public long RasterInsideTexels;
@@ -60,7 +56,6 @@ namespace MeshDeletionTool
             TriangleCountPerDepth.Clear();
             MarkedTriangleCountPerDepth.Clear();
             ParentTriangleIndexPerSubMesh = CreateIdentityParents(mesh);
-            MidpointEdges.Clear();
             RasterTexelTests = RasterInsideTexels = 0;
             CpuStageBackend cpuBackend = Backend as CpuStageBackend;
             long rasterTests0 = cpuBackend != null ? cpuBackend.RasterTexelTests : 0;
@@ -74,7 +69,7 @@ namespace MeshDeletionTool
                 {
                     break;
                 }
-                currentMesh = SplitEdges(currentMesh, splitEdges, ParentTriangleIndexPerSubMesh, out ParentTriangleIndexPerSubMesh, MidpointEdges);
+                currentMesh = SplitEdges(currentMesh, splitEdges, ParentTriangleIndexPerSubMesh, out ParentTriangleIndexPerSubMesh);
                 MarkedTriangleCountPerDepth.Add(markedCount);
                 TriangleCountPerDepth.Add(currentMesh.TriangleCount);
             }
@@ -154,8 +149,7 @@ namespace MeshDeletionTool
 
         // 指定した辺の中点に頂点を追加し、全ての三角形を分割された辺に合わせて再構成したメッシュを返す
         // parents は入力メッシュの三角形番号 → 元の三角形番号で、出力メッシュに合わせた対応表を newParents に返す
-        private static MeshArrays SplitEdges(MeshArrays mesh, HashSet<(int, int)> splitEdges, List<int[]> parents, out List<int[]> newParents,
-                                             List<(int A, int B)> midpointEdges)
+        private static MeshArrays SplitEdges(MeshArrays mesh, HashSet<(int, int)> splitEdges, List<int[]> parents, out List<int[]> newParents)
         {
             // 頂点属性をリストに写す（中点頂点を末尾に追加する）
             int originalVertexCount = mesh.VertexCount;
@@ -176,7 +170,6 @@ namespace MeshDeletionTool
             // 分割する辺ごとに中点頂点を1つ追加する（辺を共有する三角形・サブメッシュ間で共通）
             List<(int, int)> edges = new List<(int, int)>(splitEdges);
             edges.Sort();
-            midpointEdges.AddRange(edges);
             Dictionary<(int, int), int> midpointIndexMap = new Dictionary<(int, int), int>();
             foreach ((int indexA, int indexB) in edges)
             {

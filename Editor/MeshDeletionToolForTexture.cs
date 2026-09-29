@@ -40,11 +40,6 @@ namespace MeshDeletionTool
         // 詳細設定の折りたたみ
         private bool showAdvancedSettings = false;
 
-        // 計算バックエンド（要素毎の判定を CPU と GPU のどちらで行うか。自動は境界の細分化が有効で GPU が使えれば GPU、それ以外は CPU）と、処理時間の計測
-        private StageBackendMode computeBackend = StageBackendMode.Auto;
-        private bool measureTime = false;
-        private static readonly string[] BackendLabels = { "自動", "CPU", "GPU" };
-
         // テスト・計測用: null でなければ選択に関わらずこのバックエンドで処理する（呼び出し側が Dispose する）
         internal IAlphaStageBackend backendOverride;
 
@@ -143,8 +138,6 @@ namespace MeshDeletionTool
                 }
             }
             GUILayout.Label("\n④処理実行", EditorStyles.boldLabel);
-            computeBackend = (StageBackendMode)EditorGUILayout.Popup("計算バックエンド", (int)computeBackend, BackendLabels);
-            measureTime = EditorGUILayout.Toggle("時間を計測", measureTime);
             // ボタンをクリックしたらメッシュ削除処理を実行
             if (GUILayout.Button("テクスチャ透明部分のメッシュを削除"))
             {
@@ -277,13 +270,11 @@ namespace MeshDeletionTool
                 return;
             bool[] targetSubMeshes = GetTargetSubMeshes(originalMesh.subMeshCount);
 
-            // 要素毎の判定の実行先（自動は細分化が有効で GPU が使えるときだけ GPU。GPU が使えなければ CPU）
+            // 要素毎の判定の実行先（細分化が有効で GPU が使えるときは GPU、それ以外は CPU。選んだ理由は 1 行のログに出す）
             string backendNote = null;
-            IAlphaStageBackend backend = backendOverride ?? CreateBackend(computeBackend, refineBoundary && refineMaxDepth > 0, out backendNote);
-            if (backendOverride == null && backendNote != null)
-            {
-                if (computeBackend == StageBackendMode.Gpu) Debug.LogWarning(backendNote); else Debug.Log(backendNote);
-            }
+            IAlphaStageBackend backend = backendOverride ?? CreateBackend(refineBoundary && refineMaxDepth > 0, out backendNote);
+            if (backendOverride == null)
+                Debug.Log(backendNote);
 
             // 細分化 → 削除する頂点の判定 → 切断 → 再結合
             AlphaMeshDeletionPipeline pipeline = new AlphaMeshDeletionPipeline
@@ -296,17 +287,14 @@ namespace MeshDeletionTool
                 MergeCutPolygons = mergeCutPolygons,
                 SimplifyToleranceTexels = simplifyToleranceTexels,
                 Backend = backend,
-                MeasureTime = measureTime,
+                MeasureTime = true,
                 Log = Debug.Log
             };
             MeshArrays newArrays;
             try
             {
                 newArrays = Execute(targetRenderer, targetSubMeshes, pipeline);
-                if (measureTime)
-                {
-                    Debug.Log("計算バックエンド: " + backend.Name + " / " + StageTimingReport.Format(pipeline.StageTimings, backend.Timings));
-                }
+                Debug.Log(DescribeResult(originalMesh.name, MeshArraysUnityAdapter.FromMesh(originalMesh), newArrays, pipeline));
             }
             catch (ArgumentException e)
             {
@@ -366,15 +354,12 @@ namespace MeshDeletionTool
             return pipeline.Run(sourceArrays, subMeshMasks, targetSubMeshes);
         }
 
-        // 選択に従ってバックエンドを作り、選んだ理由を note に返す（1 行。CPU / GPU の明示的な選択がそのまま通ったときは null）
-        // 自動: GPU で速くなるのは境界の細分化の判定なので、細分化が有効（refineEnabled）で Compute Shader が使えるときだけ GPU にし、それ以外は CPU にする
-        // GPU: 使えなければ CPU にする（note は警告として出す）
-        internal static IAlphaStageBackend CreateBackend(StageBackendMode mode, bool refineEnabled, out string note)
+        // 要素毎の判定の実行先を自動で選び、選んだ理由を note に返す（1 行）
+        // GPU で速くなるのは境界の細分化の判定なので、細分化が有効（refineEnabled）で Compute Shader（Editor/Shaders/MeshDeletionStages.compute）が使えるときは GPU、
+        // それ以外（細分化が無効、Compute Shader 非対応、-nographics、シェーダーが見つからない）は CPU にする。結果はどちらでも同じ
+        internal static IAlphaStageBackend CreateBackend(bool refineEnabled, out string note)
         {
-            note = null;
-            if (mode == StageBackendMode.Cpu)
-                return new CpuStageBackend();
-            if (mode == StageBackendMode.Auto && !refineEnabled)
+            if (!refineEnabled)
             {
                 note = "計算バックエンド: CPU（境界の細分化が無効のため。GPU で速くなるのは細分化の判定）";
                 return new CpuStageBackend();
@@ -382,12 +367,27 @@ namespace MeshDeletionTool
             IAlphaStageBackend gpu = ComputeStageBackend.TryCreate(out string reason);
             if (gpu != null)
             {
-                if (mode == StageBackendMode.Auto)
-                    note = "計算バックエンド: " + gpu.Name + "（境界の細分化が有効で Compute Shader が使えるため）";
+                note = "計算バックエンド: " + gpu.Name;
                 return gpu;
             }
-            note = (mode == StageBackendMode.Gpu ? "GPU が使えないため CPU で処理します: " : "計算バックエンド: CPU（") + reason + (mode == StageBackendMode.Gpu ? "" : "）");
+            note = "計算バックエンド: CPU（" + reason + "）";
             return new CpuStageBackend();
+        }
+
+        // 実行結果の 1 行の要約（頂点数・三角形数の変化と処理段毎の時間）
+        internal static string DescribeResult(string meshName, MeshArrays source, MeshArrays result, AlphaMeshDeletionPipeline pipeline)
+        {
+            System.Text.StringBuilder text = new System.Text.StringBuilder();
+            double total = 0;
+            foreach (StageTiming timing in pipeline.StageTimings)
+            {
+                text.Append(text.Length > 0 ? ", " : " (").Append(timing.Name).Append(' ').Append(timing.Milliseconds.ToString("0.0")).Append(" ms");
+                total += timing.Milliseconds;
+            }
+            if (text.Length > 0)
+                text.Append(')');
+            return "MeshDeletionForTexture '" + meshName + "': 頂点 " + source.VertexCount + " → " + result.VertexCount +
+                   ", 三角形 " + source.TriangleCount + " → " + result.TriangleCount + ", " + total.ToString("0.0") + " ms" + text;
         }
 
         // サブメッシュ毎の処理対象フラグ（チェックの無いサブメッシュは対象外）

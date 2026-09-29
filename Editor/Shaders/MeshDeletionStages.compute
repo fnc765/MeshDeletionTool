@@ -23,15 +23,9 @@
 #pragma kernel ClassifyVertices
 #pragma kernel RefineTriangleTest
 #pragma kernel BisectEdges
-#pragma kernel BisectEdgesTrace
 
 #define THREADS 64
 #define BISECTION_STEPS 10
-// 診断用の記録（BisectEdgesTrace）の並び。C# の BisectionTrace と同じ
-#define TRACE_VERSION 1
-#define TRACE_HEADER_WORDS 8
-#define TRACE_STEP_WORDS 10
-#define TRACE_WORDS (TRACE_HEADER_WORDS + BISECTION_STEPS * TRACE_STEP_WORDS)
 #define MAX_POLYGON_POINTS 6
 #define WRAP_REPEAT 0
 #define WRAP_CLAMP 1
@@ -53,10 +47,6 @@ StructuredBuffer<int> _ItemMask;
 // 出力
 RWStructuredBuffer<int> _OutFlags;
 RWStructuredBuffer<float> _OutWeights;
-// 診断用の出力（BisectEdgesTrace のみ。要素毎に TRACE_WORDS 語）
-RWStructuredBuffer<uint> _OutTrace;
-// 診断用: 常に 1.0（定数バッファの値なのでコンパイラは畳み込めない。乗算結果に * _One を挟むと、続く加算との mad への融合が起きない）
-float _One;
 
 // 要素番号の始まり（1 回のディスパッチで扱える要素数を超えるとき、分割して呼ぶ）
 int _ItemOffset;
@@ -389,85 +379,6 @@ bool RefineTest(MaskView m, float2 uv0, float2 uv1, float2 uv2, int i0, int i1, 
     return CountOpaqueTexels(m, polygon, pointCount, _ChordTolerance + 1) > _ChordTolerance;
 }
 
-// 診断用: BisectEdge と同じ二分探索を行いながら、各段の t・中点 UV・px, py・テクセル座標・分類を _OutTrace に記録する（BisectEdgesTrace カーネルのみ）
-// 通常のカーネルには影響しない（別の関数）。別計算法の中点として、乗算結果に * _One を挟んで mad への融合を防いだ値も記録する
-// （C# 側は各演算に (float) を付けた厳密な単精度の値を記録する。両方を並べると、差が融合か演算精度かの区別が付く）
-float BisectEdgeTrace(MaskView m, float2 uv1, float2 uv2, int item)
-{
-    int base = item * TRACE_WORDS;
-    uint class1 = SampleClass(m, uv1);
-    _OutTrace[base + 0] = TRACE_VERSION;
-    _OutTrace[base + 1] = class1;
-    _OutTrace[base + 3] = SampleClass(m, uv2);
-    _OutTrace[base + 4] = (uint)m.Width;
-    _OutTrace[base + 5] = (uint)m.Height;
-    _OutTrace[base + 6] = 0u;
-    _OutTrace[base + 7] = 0u;
-    precise float tMin = 0.0f;
-    precise float tMax = 1.0f;
-    [loop]
-    for (int i = 0; i < BISECTION_STEPS; i++)
-    {
-        precise float sum = tMin + tMax;
-        precise float t = sum / 2.0f;
-        float2 midUV = LerpUV(uv1, uv2, t);
-
-        // 別計算法: 乗算と加算の間に * _One（= 1.0）を挟む。fma(mx, 1, ax) は ax + mx を 1 回だけ丸めた値なので、融合されても結果は分離した加算と同じ
-        precise float tc = t < 0.0f ? 0.0f : (t > 1.0f ? 1.0f : t);
-        precise float ax = uv1.x;
-        precise float ay = uv1.y;
-        precise float bx = uv2.x;
-        precise float by = uv2.y;
-        precise float dx = bx - ax;
-        precise float dy = by - ay;
-        precise float mx = dx * tc;
-        precise float my = dy * tc;
-        precise float mxb = mx * _One;
-        precise float myb = my * _One;
-        precise float rxb = ax + mxb;
-        precise float ryb = ay + myb;
-
-        // SampleClass と同じ手順で、途中の値を残す
-        precise float u = midUV.x;
-        precise float v = midUV.y;
-        precise float w = (float)(m.Width - 1);
-        precise float h = (float)(m.Height - 1);
-        precise float px = u * w;
-        precise float py = v * h;
-        int x = (int)px;
-        int y = (int)py;
-        if (x < 0 || x >= m.Width) x = WrapTexel(x, m.Width, m.WrapU);
-        if (y < 0 || y >= m.Height) y = WrapTexel(y, m.Height, m.WrapV);
-        uint midClass = _AlphaClass[LoadAlpha(m, x, y)];
-
-        int b = base + TRACE_HEADER_WORDS + i * TRACE_STEP_WORDS;
-        _OutTrace[b + 0] = asuint(t);
-        _OutTrace[b + 1] = asuint(midUV.x);
-        _OutTrace[b + 2] = asuint(midUV.y);
-        _OutTrace[b + 3] = asuint(px);
-        _OutTrace[b + 4] = asuint(py);
-        _OutTrace[b + 5] = (uint)x;
-        _OutTrace[b + 6] = (uint)y;
-        _OutTrace[b + 7] = midClass;
-        _OutTrace[b + 8] = asuint(rxb);
-        _OutTrace[b + 9] = asuint(ryb);
-
-        if (IsBoundaryClass(class1, midClass))
-        {
-            tMax = t;
-        }
-        else
-        {
-            tMin = t;
-            class1 = midClass;
-        }
-    }
-    precise float finalSum = tMin + tMax;
-    precise float weight = finalSum / 2.0f;
-    _OutTrace[base + 2] = asuint(weight);
-    return weight;
-}
-
 // 要素 = (マスク番号, 頂点番号)。_ItemMask[マスク番号] が連結バッファ内のマスク番号。頂点が透明（アルファ値 < 閾値）なら 1
 [numthreads(THREADS, 1, 1)]
 void ClassifyVertices(uint3 id : SV_DispatchThreadID)
@@ -513,37 +424,5 @@ void BisectEdges(uint3 id : SV_DispatchThreadID)
     {
         _OutFlags[item] = 0;
         _OutWeights[item] = 0.0f;
-    }
-}
-
-// 診断用: BisectEdges と同じ入出力に加えて、二分探索の途中経過を _OutTrace に書く（境界エッジでなければ記録のヘッダだけ）
-[numthreads(THREADS, 1, 1)]
-void BisectEdgesTrace(uint3 id : SV_DispatchThreadID)
-{
-    int item = (int)id.x + _ItemOffset;
-    if (item >= _Count) return;
-    MaskView m = LoadMask(_ItemMask[item]);
-    int a = _Items[item * 2 + 0];
-    int b = _Items[item * 2 + 1];
-    uint classA = SampleClass(m, _UV[a]);
-    uint classB = SampleClass(m, _UV[b]);
-    if (IsBoundaryClass(classA, classB))
-    {
-        _OutFlags[item] = 1;
-        _OutWeights[item] = BisectEdgeTrace(m, _UV[a], _UV[b], item);
-    }
-    else
-    {
-        _OutFlags[item] = 0;
-        _OutWeights[item] = 0.0f;
-        int base = item * TRACE_WORDS;
-        _OutTrace[base + 0] = TRACE_VERSION;
-        _OutTrace[base + 1] = classA;
-        _OutTrace[base + 2] = 0u;
-        _OutTrace[base + 3] = classB;
-        _OutTrace[base + 4] = (uint)m.Width;
-        _OutTrace[base + 5] = (uint)m.Height;
-        _OutTrace[base + 6] = 0u;
-        _OutTrace[base + 7] = 0u;
     }
 }

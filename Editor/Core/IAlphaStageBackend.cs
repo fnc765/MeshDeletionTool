@@ -20,55 +20,13 @@ namespace MeshDeletionTool
         public int MaxRasterSize;
     }
 
-    // バックエンドが記録した処理段の時間（診断・ベンチマーク用）
+    // バックエンドが記録した処理段の時間（処理時間のログ用）
     public class StageTiming
     {
         public string Name;
         public int Calls;
         public long Elements;
         public double Milliseconds;
-    }
-
-    // GUI の「計算バックエンド」の選択肢
-    public enum StageBackendMode
-    {
-        // 境界の細分化が有効で GPU が使えれば GPU、それ以外は CPU
-        Auto = 0,
-        Cpu = 1,
-        Gpu = 2
-    }
-
-    // 処理段の時間を 1 行の文字列にする（「時間を計測」のログとベンチマークで共用）
-    public static class StageTimingReport
-    {
-        public static string Format(IEnumerable<StageTiming> stages, IEnumerable<StageTiming> kernels)
-        {
-            System.Text.StringBuilder text = new System.Text.StringBuilder();
-            double total = 0;
-            foreach (StageTiming timing in stages)
-            {
-                if (text.Length > 0) text.Append(", ");
-                text.Append(timing.Name).Append(' ').Append(timing.Milliseconds.ToString("0.0")).Append(" ms");
-                total += timing.Milliseconds;
-            }
-            text.Insert(0, "処理時間: ").Append(", 合計 ").Append(total.ToString("0.0")).Append(" ms");
-            bool first = true;
-            foreach (StageTiming timing in kernels)
-            {
-                text.Append(first ? " / カーネル: " : ", ");
-                first = false;
-                text.Append(timing.Name).Append(' ').Append(timing.Calls).Append(" 回 ").Append(timing.Elements.ToString("#,0")).Append(" 要素 ")
-                    .Append(timing.Milliseconds.ToString("0.0")).Append(" ms");
-            }
-            return text.ToString();
-        }
-    }
-
-    // 診断用: 1 本の辺の二分探索を途中経過付きで実行できるバックエンド（CPU / GPU）。ベンチマークの「診断」が結果不一致のときに使う
-    public interface IBisectionTracer
-    {
-        // uvA → uvB の辺（切断処理と同じく頂点番号の昇順の向き）の二分探索を行い、BisectionTrace.Words 語の記録を返す。使えなければ null と理由
-        uint[] TraceBisection(Vector2 uvA, Vector2 uvB, AlphaMask mask, float alphaThreshold, out string reason);
     }
 
     // テクスチャのアルファ値に対する要素毎に独立な処理段（頂点の透明判定・三角形の細分化判定・辺上の境界点の二分探索）の実行先

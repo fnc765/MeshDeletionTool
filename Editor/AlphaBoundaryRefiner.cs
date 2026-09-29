@@ -360,20 +360,15 @@ namespace MeshDeletionTool
         {
             vertices.Add(Vector3.Lerp(vertices[indexA], vertices[indexB], 0.5f));
 
+            // 法線と接線は削除処理の境界点頂点と同じ規則で補間する（接線は補間後の法線と直交させ、w は先頭側の頂点の値）
+            Vector3 normal = Vector3.zero;
             if (normals.Count > 0)
             {
-                Vector3 normal = Vector3.Lerp(normals[indexA], normals[indexB], 0.5f);
-                normals.Add(normal.sqrMagnitude > 0f ? normal.normalized : normals[indexA]);
+                normal = VertexAttributeUtils.LerpNormal(normals[indexA], normals[indexB], 0.5f);
+                normals.Add(normal);
             }
             if (tangents.Count > 0)
-            {
-                // xyz のみ補間し、w（従法線の向き）は補間せず先頭側の頂点の値を使う
-                Vector4 tangentA = tangents[indexA];
-                Vector4 tangentB = tangents[indexB];
-                Vector3 tangent = Vector3.Lerp(new Vector3(tangentA.x, tangentA.y, tangentA.z), new Vector3(tangentB.x, tangentB.y, tangentB.z), 0.5f);
-                if (tangent.sqrMagnitude > 0f) tangent.Normalize();
-                tangents.Add(new Vector4(tangent.x, tangent.y, tangent.z, tangentA.w));
-            }
+                tangents.Add(VertexAttributeUtils.LerpTangent(tangents[indexA], tangents[indexB], 0.5f, normal));
             if (uv.Count > 0)
                 uv.Add(Vector2.Lerp(uv[indexA], uv[indexB], 0.5f));
             if (uv2.Count > 0)

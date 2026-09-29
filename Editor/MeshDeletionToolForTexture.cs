@@ -768,10 +768,15 @@ namespace MeshDeletionTool
             newMeshDataVertex.Vertices.Add(Vector3.Lerp(originalMesh.vertices[indexs[0]], originalMesh.vertices[indexs[1]], weight));
             newMeshDataVertex.UV.Add(Vector2.Lerp(originalMesh.uv[indexs[0]], originalMesh.uv[indexs[1]], weight));
 
+            // 法線は補間後に正規化し、接線は補間後の法線と直交させて正規化する。接線の w（従法線の向き）は補間せず重みの近い側の値を使う
+            Vector3 normal = Vector3.zero;
             if (indexs[0] < originalMesh.normals.Length && indexs[1] < originalMesh.normals.Length)
-                newMeshDataVertex.Normals.Add(Vector3.Lerp(originalMesh.normals[indexs[0]], originalMesh.normals[indexs[1]], weight));
+            {
+                normal = VertexAttributeUtils.LerpNormal(originalMesh.normals[indexs[0]], originalMesh.normals[indexs[1]], weight);
+                newMeshDataVertex.Normals.Add(normal);
+            }
             if (indexs[0] < originalMesh.tangents.Length && indexs[1] < originalMesh.tangents.Length)
-                newMeshDataVertex.Tangents.Add(Vector3.Lerp(originalMesh.tangents[indexs[0]], originalMesh.tangents[indexs[1]], weight));
+                newMeshDataVertex.Tangents.Add(VertexAttributeUtils.LerpTangent(originalMesh.tangents[indexs[0]], originalMesh.tangents[indexs[1]], weight, normal));
             
             if (indexs[0] < originalMesh.uv2.Length && indexs[1] < originalMesh.uv2.Length)
                 newMeshDataVertex.UV2.Add(Vector2.Lerp(originalMesh.uv2[indexs[0]], originalMesh.uv2[indexs[1]], weight));

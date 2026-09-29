@@ -40,9 +40,8 @@ namespace MeshDeletionTool
         public long RasterTexelTests;
         public long RasterInsideTexels;
 
-        // 不透明判定の表（アルファ値 → 閾値以上か）。閾値ごとに作り直す
-        private bool[] opaqueTable;
-        private float opaqueTableThreshold;
+        // 要素毎の判定（三角形の細分化判定）の実行先。既定は CPU。GPU（ComputeStageBackend）でも同じ結果になる
+        public IAlphaStageBackend Backend = new CpuStageBackend();
 
         // アルファ境界付近の三角形を細分化したメッシュを返す
         // subMeshMasks[i] が null のサブメッシュは判定対象外（隣接する辺の分割にのみ追従する）
@@ -53,7 +52,9 @@ namespace MeshDeletionTool
             MarkedTriangleCountPerDepth.Clear();
             ParentTriangleIndexPerSubMesh = CreateIdentityParents(mesh);
             RasterTexelTests = RasterInsideTexels = 0;
-            opaqueTable = null;
+            CpuStageBackend cpuBackend = Backend as CpuStageBackend;
+            long rasterTests0 = cpuBackend != null ? cpuBackend.RasterTexelTests : 0;
+            long rasterInside0 = cpuBackend != null ? cpuBackend.RasterInsideTexels : 0;
 
             MeshArrays currentMesh = mesh;
             for (int depth = 0; depth < MaxDepth; depth++)
@@ -66,6 +67,11 @@ namespace MeshDeletionTool
                 currentMesh = SplitEdges(currentMesh, splitEdges, ParentTriangleIndexPerSubMesh, out ParentTriangleIndexPerSubMesh);
                 MarkedTriangleCountPerDepth.Add(markedCount);
                 TriangleCountPerDepth.Add(currentMesh.TriangleCount);
+            }
+            if (cpuBackend != null)
+            {
+                RasterTexelTests = cpuBackend.RasterTexelTests - rasterTests0;
+                RasterInsideTexels = cpuBackend.RasterInsideTexels - rasterInside0;
             }
             return currentMesh;
         }
@@ -87,24 +93,38 @@ namespace MeshDeletionTool
         }
 
         // 細分化対象の三角形を判定し、分割する辺（頂点インデックスの昇順ペア）の集合を返す
+        // 判定そのもの（3頂点の透明判定、修正1のテクセルのラスタライズ、修正2の境界点の二分探索と削除側多角形のテクセル数）は
+        // 全サブメッシュの三角形をまとめてバックエンド（StageKernelContext.RefineTriangleTest / HLSL の同名カーネル）で行う
         private HashSet<(int, int)> CollectEdgesToSplit(MeshArrays mesh, AlphaMask[] subMeshMasks, float alphaThreshold, out int markedCount)
         {
             HashSet<(int, int)> splitEdges = new HashSet<(int, int)>();
             markedCount = 0;
-            Vector2[] uvs = mesh.UV;
+
+            AlphaMask[] masks = new AlphaMask[mesh.SubMeshCount];
+            for (int subMeshIndex = 0; subMeshIndex < mesh.SubMeshCount; subMeshIndex++)
+            {
+                masks[subMeshIndex] = subMeshIndex < subMeshMasks.Length ? subMeshMasks[subMeshIndex] : null;
+            }
+            RefineTestParams settings = new RefineTestParams
+            {
+                RefineFullyTransparentTriangles = RefineFullyTransparentTriangles,
+                RefinePartiallyCutTriangles = RefinePartiallyCutTriangles,
+                ChordToleranceTexels = ChordToleranceTexels,
+                MaxRasterSize = MaxRasterSize
+            };
+            bool[][] marked = Backend.TestRefineTriangles(mesh.UV, mesh.SubMeshTriangles, masks, settings, alphaThreshold);
 
             for (int subMeshIndex = 0; subMeshIndex < mesh.SubMeshCount; subMeshIndex++)
             {
-                AlphaMask mask = subMeshIndex < subMeshMasks.Length ? subMeshMasks[subMeshIndex] : null;
-                if (mask == null)
+                bool[] markedInSubMesh = marked[subMeshIndex];
+                if (markedInSubMesh == null)
                 {
                     continue;
                 }
-
                 int[] triangles = mesh.GetTriangles(subMeshIndex);
                 for (int i = 0; i < triangles.Length; i += 3)
                 {
-                    if (ShouldSubdivide(mask, uvs, triangles[i], triangles[i + 1], triangles[i + 2], alphaThreshold))
+                    if (markedInSubMesh[i / 3])
                     {
                         markedCount++;
                         splitEdges.Add(MakeEdgeKey(triangles[i], triangles[i + 1]));
@@ -114,182 +134,6 @@ namespace MeshDeletionTool
                 }
             }
             return splitEdges;
-        }
-
-        // 三角形を細分化すべきか判定する
-        private bool ShouldSubdivide(AlphaMask mask, Vector2[] uvs, int indexA, int indexB, int indexC, float alphaThreshold)
-        {
-            Vector2[] uv = { uvs[indexA], uvs[indexB], uvs[indexC] };
-
-            // 最長辺が1テクセル未満の三角形はこれ以上細分化しない（終了保証）
-            if (LongestEdgeInTexels(mask, uv) < 1f)
-            {
-                return false;
-            }
-
-            bool[] transparent =
-            {
-                AlphaSampling.IsTransparent(mask, uv[0], alphaThreshold),
-                AlphaSampling.IsTransparent(mask, uv[1], alphaThreshold),
-                AlphaSampling.IsTransparent(mask, uv[2], alphaThreshold)
-            };
-            int transparentCount = (transparent[0] ? 1 : 0) + (transparent[1] ? 1 : 0) + (transparent[2] ? 1 : 0);
-
-            // 3頂点とも透明: 内部に不透明テクセルがあれば細分化する（修正1）
-            if (transparentCount == 3)
-            {
-                return RefineFullyTransparentTriangles && CountOpaqueTexels(mask, uv, alphaThreshold, 1) > 0;
-            }
-            // 3頂点とも不透明: 既存処理でそのまま残るため対象外
-            if (transparentCount == 0)
-            {
-                return false;
-            }
-            // 一部の頂点が透明: 既存処理で削除される側の多角形に不透明テクセルが含まれていれば細分化する（修正2）
-            if (!RefinePartiallyCutTriangles)
-            {
-                return false;
-            }
-            int[] index = { indexA, indexB, indexC };
-            List<Vector2> removedPolygon = BuildRemovedPolygon(mask, uv, index, transparent, alphaThreshold);
-            return CountOpaqueTexels(mask, removedPolygon, alphaThreshold, ChordToleranceTexels + 1) > ChordToleranceTexels;
-        }
-
-        // 既存処理と同じ境界点（辺上の二分探索）を使い、三角形のうち削除される側の多角形（UV座標、外周順）を作る
-        private static List<Vector2> BuildRemovedPolygon(AlphaMask mask, Vector2[] uv, int[] index, bool[] transparent, float alphaThreshold)
-        {
-            List<Vector2> polygon = new List<Vector2>(4);
-            for (int i = 0; i < 3; i++)
-            {
-                int j = (i + 1) % 3;
-                if (transparent[i])
-                {
-                    polygon.Add(uv[i]);
-                }
-                if (AlphaSampling.IsBoundaryEdge(mask, uv[i], uv[j], alphaThreshold))
-                {
-                    // 辺の向きも既存処理と同じ（頂点インデックスの昇順）にして同一の境界点を得る
-                    (Vector2 uvA, Vector2 uvB) = index[i] < index[j] ? (uv[i], uv[j]) : (uv[j], uv[i]);
-                    float weight = AlphaSampling.FindAlphaBoundary(mask, uvA, uvB, alphaThreshold);
-                    polygon.Add(Vector2.Lerp(uvA, uvB, weight));
-                }
-            }
-            return polygon;
-        }
-
-        // 三角形の最長辺の長さ（テクセル単位）
-        private static float LongestEdgeInTexels(AlphaMask mask, Vector2[] uv)
-        {
-            Vector2 scale = new Vector2(mask.Width - 1, mask.Height - 1);
-            float longest = 0f;
-            for (int i = 0; i < 3; i++)
-            {
-                Vector2 edge = Vector2.Scale(uv[(i + 1) % 3] - uv[i], scale);
-                longest = Mathf.Max(longest, edge.magnitude);
-            }
-            return longest;
-        }
-
-        // 凸多角形（UV座標）の内部にある不透明テクセルの数を数える（stopAt に達したら打ち切る）
-        private int CountOpaqueTexels(AlphaMask mask, IList<Vector2> polygon, float alphaThreshold, int stopAt)
-        {
-            if (polygon.Count < 3)
-            {
-                return 0;
-            }
-
-            int width = mask.Width;
-            int height = mask.Height;
-
-            // 既存処理と同じテクセル座標系 (x = u * (w - 1), y = v * (h - 1)) に変換し、バウンディングボックスを求める
-            int pointCount = polygon.Count;
-            Vector2[] points = new Vector2[pointCount];
-            float minX = float.MaxValue, minY = float.MaxValue, maxX = float.MinValue, maxY = float.MinValue;
-            for (int i = 0; i < pointCount; i++)
-            {
-                points[i] = new Vector2(polygon[i].x * (width - 1), polygon[i].y * (height - 1));
-                minX = Mathf.Min(minX, points[i].x);
-                minY = Mathf.Min(minY, points[i].y);
-                maxX = Mathf.Max(maxX, points[i].x);
-                maxY = Mathf.Max(maxY, points[i].y);
-            }
-
-            // 多角形の向き（面積0なら内部のテクセルは無い）
-            float signedArea = 0f;
-            for (int i = 0; i < pointCount; i++)
-            {
-                Vector2 p = points[i];
-                Vector2 q = points[(i + 1) % pointCount];
-                signedArea += p.x * q.y - q.x * p.y;
-            }
-            if (Mathf.Approximately(signedArea, 0f))
-            {
-                return 0;
-            }
-            float orientation = signedArea > 0f ? 1f : -1f;
-
-            // テクセル範囲（GetPixel と同様にテクスチャの範囲内に制限する）
-            int x0 = Mathf.Clamp(Mathf.FloorToInt(minX), 0, width - 1);
-            int x1 = Mathf.Clamp(Mathf.FloorToInt(maxX), 0, width - 1);
-            int y0 = Mathf.Clamp(Mathf.FloorToInt(minY), 0, height - 1);
-            int y1 = Mathf.Clamp(Mathf.FloorToInt(maxY), 0, height - 1);
-
-            // 巨大な多角形は間引いてサンプリングする
-            int stride = Mathf.Max(1, Mathf.CeilToInt(Mathf.Max(x1 - x0 + 1, y1 - y0 + 1) / (float)MaxRasterSize));
-
-            // 各辺の始点と方向を先に求める（テクセル毎の内外判定 (q - p) × (c - p) の式そのものは変えない）
-            float[] edgeX = new float[pointCount], edgeY = new float[pointCount], edgeDx = new float[pointCount], edgeDy = new float[pointCount];
-            for (int i = 0; i < pointCount; i++)
-            {
-                Vector2 p = points[i];
-                Vector2 q = points[(i + 1) % pointCount];
-                edgeX[i] = p.x;
-                edgeY[i] = p.y;
-                edgeDx[i] = q.x - p.x;
-                edgeDy[i] = q.y - p.y;
-            }
-            if (opaqueTable == null || opaqueTableThreshold != alphaThreshold)
-            {
-                opaqueTable = mask.BuildOpaqueTable(alphaThreshold);
-                opaqueTableThreshold = alphaThreshold;
-            }
-            bool[] opaque = opaqueTable;
-
-            int count = 0;
-            for (int y = y0; y <= y1; y += stride)
-            {
-                float centerY = y + 0.5f;
-                for (int x = x0; x <= x1; x += stride)
-                {
-                    // テクセルの中心が多角形の内部にあるか
-                    float centerX = x + 0.5f;
-                    RasterTexelTests++;
-                    bool inside = true;
-                    for (int i = 0; i < pointCount; i++)
-                    {
-                        float cross = edgeDx[i] * (centerY - edgeY[i]) - edgeDy[i] * (centerX - edgeX[i]);
-                        if (cross * orientation < 0f)
-                        {
-                            inside = false;
-                            break;
-                        }
-                    }
-                    if (!inside)
-                    {
-                        continue;
-                    }
-                    RasterInsideTexels++;
-                    if (opaque[mask.AlphaByteUnchecked(x, y)])
-                    {
-                        count++;
-                        if (count >= stopAt)
-                        {
-                            return count;
-                        }
-                    }
-                }
-            }
-            return count;
         }
 
         // 辺のキー（頂点インデックスの昇順ペア）

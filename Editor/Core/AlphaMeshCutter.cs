@@ -12,6 +12,9 @@ namespace MeshDeletionTool
         // アルファ値がこの値より小さいメッシュは削除する
         public float AlphaThreshold = 0.5F;
 
+        // 要素毎の判定（頂点の透明判定、辺上の境界点の二分探索）の実行先。既定は CPU。GPU（ComputeStageBackend）でも同じ結果になる
+        public IAlphaStageBackend Backend = new CpuStageBackend();
+
         // テクスチャに基づいて削除すべき頂点のインデックスを取得するメソッド（降順）
         public List<int> GetVerticesToRemove(MeshArrays originalMesh, AlphaMask[] subMeshMasks)
         {
@@ -19,6 +22,9 @@ namespace MeshDeletionTool
 
             int subMeshCount = originalMesh.SubMeshCount;
             List<HashSet<int>> subMeshTrianglesList = new List<HashSet<int>>();
+
+            // 全頂点の透明判定（アルファ値 < 閾値）をマスク毎にまとめてバックエンドで行う（同じテクスチャのサブメッシュは 1 回）
+            bool[][] transparent = Backend.ClassifyVertices(originalMesh.UV, PadMasks(subMeshMasks, subMeshCount), AlphaThreshold);
 
             // 各サブメッシュの三角形リストを取得
             for (int subMeshIndex = 0; subMeshIndex < subMeshCount; subMeshIndex++)
@@ -37,16 +43,11 @@ namespace MeshDeletionTool
                 {
                     if (subMeshTrianglesList[subMeshIndex].Contains(vertexIndex))
                     {
-                        Vector2 uv = originalMesh.UV[vertexIndex];
-                        AlphaMask mask = subMeshIndex < subMeshMasks.Length ? subMeshMasks[subMeshIndex] : null;
-                        if (mask != null)
+                        // ピクセルのアルファ値がalphaThresholdより小さいなら頂点を削除対象とする（テクスチャの無いサブメッシュは判定しない）
+                        if (transparent[subMeshIndex] != null && transparent[subMeshIndex][vertexIndex])
                         {
-                            // ピクセルのアルファ値がalphaThresholdより小さいなら頂点を削除対象とする
-                            if (AlphaSampling.IsTransparent(mask, uv, AlphaThreshold))
-                            {
-                                vertexShouldBeRemoved = true;
-                                break;
-                            }
+                            vertexShouldBeRemoved = true;
+                            break;
                         }
                     }
                 }
@@ -123,10 +124,15 @@ namespace MeshDeletionTool
             int subMeshCount = originalMesh.SubMeshCount;
             List<List<int>> newSubMeshTrianglesList = new List<List<int>>(subMeshCount);
 
+            // 境界点を求める辺（一部の頂点だけが削除される三角形の辺）を集め、境界判定と二分探索をまとめてバックエンドで行う
+            Dictionary<(int, int), int>[] edgeSlots = CollectStraddlingEdges(originalMesh, subMeshMasks, targetSubMeshes, isRemoved, out int[][] edgeSets);
+            Backend.BisectEdges(originalMesh.UV, edgeSets, PadMasks(subMeshMasks, subMeshCount), AlphaThreshold, out bool[][] edgeIsBoundary, out float[][] edgeWeights);
+
             // サブメッシュ毎に三角ポリゴンを処理する
             for (int subMeshIndex = 0; subMeshIndex < subMeshCount; subMeshIndex++)
             {
                 AlphaMask mask = subMeshIndex < subMeshMasks.Length ? subMeshMasks[subMeshIndex] : null;
+                EdgeResults edgeResults = new EdgeResults(edgeSlots[subMeshIndex], edgeIsBoundary[subMeshIndex], edgeWeights[subMeshIndex]);
 
                 int[] triangles = originalMesh.GetTriangles(subMeshIndex);
                 List<int> newSubMeshTriangles = new List<int>();
@@ -173,7 +179,7 @@ namespace MeshDeletionTool
 
                             // 辺上の新規頂点座標と、シェイプキー用補完重みを計算
                             (MeshData addMeshData, List<(int, int, float)> localVertexInterpolation, List<int> crossedSides) =
-                                addNewVertexToEdge(originalMesh, mask, triangleIndexs);
+                                addNewVertexToEdge(originalMesh, mask, edgeResults, triangleIndexs);
 
                             // 追加頂点の中で重複が無いように全体メッシュへ頂点を追加する（既存頂点はシームなどで重複がある）
                             // シェイプキー用補完重みも同様に重複を排除する
@@ -258,6 +264,82 @@ namespace MeshDeletionTool
             return oldToNewIndexMap;
         }
 
+        // subMeshMasks をサブメッシュ数に合わせる（足りない分は null）
+        private static AlphaMask[] PadMasks(AlphaMask[] subMeshMasks, int subMeshCount)
+        {
+            AlphaMask[] masks = new AlphaMask[subMeshCount];
+            for (int subMeshIndex = 0; subMeshIndex < subMeshCount; subMeshIndex++)
+            {
+                masks[subMeshIndex] = subMeshIndex < subMeshMasks.Length ? subMeshMasks[subMeshIndex] : null;
+            }
+            return masks;
+        }
+
+        // 処理対象のサブメッシュ毎に、一部の頂点だけが削除される三角形の辺（頂点インデックスの昇順ペア、重複無し）を集める
+        // 戻り値はサブメッシュ毎の辺 → edgeSets 内の番号、edgeSets[k] は辺の頂点番号を 2 つずつ並べたもの（対象外・テクスチャ無しは空）
+        private static Dictionary<(int, int), int>[] CollectStraddlingEdges(MeshArrays originalMesh, AlphaMask[] subMeshMasks, bool[] targetSubMeshes,
+                                                                            bool[] isRemoved, out int[][] edgeSets)
+        {
+            int subMeshCount = originalMesh.SubMeshCount;
+            Dictionary<(int, int), int>[] edgeSlots = new Dictionary<(int, int), int>[subMeshCount];
+            edgeSets = new int[subMeshCount][];
+            for (int subMeshIndex = 0; subMeshIndex < subMeshCount; subMeshIndex++)
+            {
+                Dictionary<(int, int), int> slots = new Dictionary<(int, int), int>();
+                List<int> edges = new List<int>();
+                AlphaMask mask = subMeshIndex < subMeshMasks.Length ? subMeshMasks[subMeshIndex] : null;
+                if (targetSubMeshes[subMeshIndex] && mask != null)
+                {
+                    int[] triangles = originalMesh.GetTriangles(subMeshIndex);
+                    for (int i = 0; i < triangles.Length; i += 3)
+                    {
+                        int removedCount = (isRemoved[triangles[i]] ? 1 : 0) + (isRemoved[triangles[i + 1]] ? 1 : 0) + (isRemoved[triangles[i + 2]] ? 1 : 0);
+                        if (removedCount == 0 || removedCount == 3)
+                            continue;
+                        for (int side = 0; side < 3; side++)
+                        {
+                            int a = triangles[i + side], b = triangles[i + (side + 1) % 3];
+                            (int, int) key = a < b ? (a, b) : (b, a);
+                            if (!slots.ContainsKey(key))
+                            {
+                                slots[key] = edges.Count / 2;
+                                edges.Add(key.Item1);
+                                edges.Add(key.Item2);
+                            }
+                        }
+                    }
+                }
+                edgeSlots[subMeshIndex] = slots;
+                edgeSets[subMeshIndex] = edges.ToArray();
+            }
+            return edgeSlots;
+        }
+
+        // 1 つのサブメッシュの辺毎の境界判定と重み（バックエンドの結果の参照）
+        private readonly struct EdgeResults
+        {
+            private readonly Dictionary<(int, int), int> slots;
+            private readonly bool[] isBoundary;
+            private readonly float[] weights;
+
+            public EdgeResults(Dictionary<(int, int), int> slots, bool[] isBoundary, float[] weights)
+            {
+                this.slots = slots;
+                this.isBoundary = isBoundary;
+                this.weights = weights;
+            }
+
+            // 辺（昇順）が境界エッジなら true と重みを返す
+            public bool TryGetBoundary(int indexA, int indexB, out float weight)
+            {
+                weight = 0f;
+                if (isBoundary == null || !slots.TryGetValue((indexA, indexB), out int slot) || !isBoundary[slot])
+                    return false;
+                weight = weights[slot];
+                return true;
+            }
+        }
+
         // 削除対象でない頂点を多角形頂点に追加
         private (List<Vector3>, List<int>) addNonDeletableVertexToPolygon(MeshArrays originalMesh,
                                                                           int[] oldToNewIndexMap,
@@ -277,7 +359,7 @@ namespace MeshDeletionTool
         }
 
         // 辺への新規頂点追加（境界点が見つかった辺の番号 0〜2 も返す）
-        private (MeshData, List<(int, int, float)>, List<int>) addNewVertexToEdge(MeshArrays originalMesh, AlphaMask mask,
+        private (MeshData, List<(int, int, float)>, List<int>) addNewVertexToEdge(MeshArrays originalMesh, AlphaMask mask, EdgeResults edgeResults,
                                                                                   List<(int index, bool isRemoved)> triangleIndexs)
         {
             MeshData addMeshData = new MeshData();
@@ -295,7 +377,7 @@ namespace MeshDeletionTool
                 for (int triangleIndex = 0; triangleIndex < 3; triangleIndex++)
                 {
                     (MeshData newMeshDataVertex, (int, int, float) interpolation) =
-                        AddEdgeIntersectionPoints(originalMesh, mask, sideIndexs[triangleIndex]);
+                        AddEdgeIntersectionPoints(originalMesh, edgeResults, sideIndexs[triangleIndex]);
                     if (newMeshDataVertex != null) // テクスチャ境界値があるなら
                     {
                         // ２つの頂点（インデックス昇順）と重みを保存
@@ -309,23 +391,17 @@ namespace MeshDeletionTool
         }
 
         // originalMeshのエッジとテクスチャの境界点を検出し、新しい頂点のMeshData（境界点が無ければ null）と補完情報（両端の頂点インデックス昇順, 重み）を返す関数
-        private (MeshData, (int, int, float)) AddEdgeIntersectionPoints(MeshArrays originalMesh, AlphaMask mask, int[] indexs)
+        private (MeshData, (int, int, float)) AddEdgeIntersectionPoints(MeshArrays originalMesh, EdgeResults edgeResults, int[] indexs)
         {
             // エッジの両端点を頂点インデックスの昇順に並べる
             // （辺を共有する三角形は辺を逆向きに辿るため、向きに依存する二分探索では境界点が1ulp程度ずれて別の頂点になっていた）
             int[] edge = indexs[0] < indexs[1] ? new int[] { indexs[0], indexs[1] } : new int[] { indexs[1], indexs[0] };
 
-            // エッジの両端点のUV座標を取得
-            Vector2 uv1 = originalMesh.UV[edge[0]];
-            Vector2 uv2 = originalMesh.UV[edge[1]];
             MeshData newMeshDataVertex = null;
-            float weight = 0;
 
-            // エッジが境界エッジかどうかを判定
-            if (AlphaSampling.IsBoundaryEdge(mask, uv1, uv2, AlphaThreshold))
+            // エッジが境界エッジなら、境界点のUV座標と頂点座標を計算（境界判定と二分探索の重みはバックエンドで求めてある）
+            if (edgeResults.TryGetBoundary(edge[0], edge[1], out float weight))
             {
-                // 境界エッジの場合、境界点のUV座標と頂点座標を計算
-                weight = AlphaSampling.FindAlphaBoundary(mask, uv1, uv2, AlphaThreshold);
                 newMeshDataVertex = VertexCompletion(originalMesh, edge, weight);
             }
 

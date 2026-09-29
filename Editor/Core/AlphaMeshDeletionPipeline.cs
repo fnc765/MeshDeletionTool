@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Linq;
 using UnityEngine;
 
@@ -31,6 +32,16 @@ namespace MeshDeletionTool
         // 進行状況の記録先（Debug.Log 相当。null なら記録しない）
         public Action<string> Log;
 
+        // 要素毎の判定（頂点の透明判定、三角形の細分化判定、辺上の境界点の二分探索）の実行先。既定は CPU
+        // GPU（ComputeStageBackend）を指定しても結果は同じになる。所有者が Dispose する
+        public IAlphaStageBackend Backend = new CpuStageBackend();
+
+        // 各処理段の時間を StageTimings に記録する（ベンチマーク・「時間を計測」用）
+        public bool MeasureTime;
+
+        // 実行結果: 処理段毎の時間（MeasureTime が有効なとき。細分化 / 頂点判定 / 切断 / 再結合）
+        public List<StageTiming> StageTimings = new List<StageTiming>();
+
         // 実行結果: サブメッシュ毎の、出力メッシュの三角形番号 → 元のメッシュの三角形番号（テスト・診断用）
         public List<int[]> OutputTriangleParents;
 
@@ -38,21 +49,26 @@ namespace MeshDeletionTool
         public MeshArrays Run(MeshArrays sourceMesh, AlphaMask[] subMeshMasks, bool[] targetSubMeshes)
         {
             MeshArrays originalMesh = sourceMesh;
+            StageTimings.Clear();
+            Stopwatch stopwatch = Stopwatch.StartNew();
 
             // 境界の細分化（削除処理の前に、アルファ境界付近の三角形を細分化したメッシュに置き換える）
             List<int[]> refinedTriangleParents = null;   // 細分化後の三角形番号 → 元の三角形番号
             if (RefineBoundary && RefineMaxDepth > 0)
             {
                 originalMesh = RefineMeshAroundAlphaBoundary(originalMesh, subMeshMasks, targetSubMeshes, out refinedTriangleParents);
+                RecordStage("細分化", stopwatch);
             }
 
-            AlphaMeshCutter cutter = new AlphaMeshCutter { AlphaThreshold = AlphaThreshold };
+            AlphaMeshCutter cutter = new AlphaMeshCutter { AlphaThreshold = AlphaThreshold, Backend = Backend };
             // 削除すべき頂点のインデックスを取得
             List<int> removeVerticesIndexs = cutter.GetVerticesToRemove(originalMesh, subMeshMasks);
+            RecordStage("頂点判定", stopwatch);
             // 新しいメッシュを作成
             MeshArrays newMesh = cutter.Cut(originalMesh, subMeshMasks, targetSubMeshes, removeVerticesIndexs, out List<int[]> sourceTriangleIndices);
             // 出力三角形 → 元の三角形の対応を保持する
             OutputTriangleParents = ComposeTriangleParents(sourceTriangleIndices, refinedTriangleParents);
+            RecordStage("切断", stopwatch);
 
             // 切断後の再結合（細分化で増えた三角形を元の三角形ごとに結合し直す）
             if (refinedTriangleParents != null && MergeCutPolygons)
@@ -60,8 +76,19 @@ namespace MeshDeletionTool
                 // 出力メッシュの先頭には元のメッシュの頂点（削除されなかったもの）が並ぶ。これらは再結合で取り除かない
                 int keptOriginalVertexCount = sourceMesh.VertexCount - removeVerticesIndexs.Count(index => index < sourceMesh.VertexCount);
                 newMesh = MergeCutPolygonsStep(newMesh, sourceMesh, subMeshMasks, targetSubMeshes, keptOriginalVertexCount);
+                RecordStage("再結合", stopwatch);
             }
             return newMesh;
+        }
+
+        // 直前の記録からの経過時間を処理段の時間として記録し、計測をやり直す
+        private void RecordStage(string name, Stopwatch stopwatch)
+        {
+            if (MeasureTime)
+            {
+                StageTimings.Add(new StageTiming { Name = name, Calls = 1, Milliseconds = stopwatch.Elapsed.TotalMilliseconds });
+            }
+            stopwatch.Restart();
         }
 
         // アルファ境界付近の三角形を細分化したメッシュを返すメソッド（処理対象のサブメッシュのみ判定する）
@@ -81,6 +108,7 @@ namespace MeshDeletionTool
 
             AlphaBoundaryRefiner refiner = new AlphaBoundaryRefiner
             {
+                Backend = Backend,
                 MaxDepth = RefineMaxDepth,
                 RefinePartiallyCutTriangles = RefinePartiallyCutTriangles,
                 ChordToleranceTexels = RefineChordToleranceTexels

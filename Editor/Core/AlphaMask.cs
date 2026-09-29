@@ -20,6 +20,9 @@ namespace MeshDeletionTool
         // 診断用: 参照したテクセルの数
         public long SampleCount;
 
+        // アルファ値の配列そのもの（GetPixels32 と同じ並び）。処理段のバックエンドがまとめて参照・転送するためのもので、変更しないこと
+        public byte[] AlphaBytes => alpha;
+
         public AlphaMask(int width, int height, byte[] alpha)
         {
             if (width <= 0 || height <= 0)

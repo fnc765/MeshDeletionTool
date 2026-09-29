@@ -17,6 +17,12 @@ namespace MeshDeletionTool
         // サブメッシュの表示フラグ
         private Dictionary<int, bool> subMeshVisibility = new Dictionary<int, bool>();
 
+        // 境界の細分化: 削除処理の前にアルファ境界付近の三角形を細分化する（無効にすると従来の動作）
+        private bool refineBoundary = true;
+
+        // 細分化の最大深さ
+        private int refineMaxDepth = 3;
+
         // メニューアイテムからツールを初期化してウィンドウを表示するメソッド
         [MenuItem("Tools/MeshDeletionToolForTexture")]
         private static void Init()
@@ -39,6 +45,12 @@ namespace MeshDeletionTool
             // アルファ閾値を指定するスライダーを追加
             GUILayout.Label("\n②アルファ閾値を設定", EditorStyles.boldLabel);
             alphaThreshold = EditorGUILayout.Slider("アルファ閾値", alphaThreshold, 0f, 1f);
+
+            // 境界の細分化の設定
+            refineBoundary = EditorGUILayout.Toggle("境界の細分化", refineBoundary);
+            EditorGUI.BeginDisabledGroup(!refineBoundary);
+            refineMaxDepth = EditorGUILayout.IntSlider("細分化の最大深さ", refineMaxDepth, 0, 5);
+            EditorGUI.EndDisabledGroup();
 
             // サブメッシュを選択するリストを表示
             GUILayout.Label("\n③サブメッシュ一覧から処理対象を選択", EditorStyles.boldLabel);
@@ -126,6 +138,12 @@ namespace MeshDeletionTool
             if (originalMesh == null)
                 return;
 
+            // 境界の細分化（削除処理の前に、アルファ境界付近の三角形を細分化したメッシュに置き換える）
+            if (refineBoundary && refineMaxDepth > 0)
+            {
+                originalMesh = RefineMeshAroundAlphaBoundary(originalMesh, originalMaterials);
+            }
+
             // 削除すべき頂点のインデックスを取得
             List<int> removeVerticesIndexs = GetVerticesToRemoveFromTexture(originalMesh, originalMaterials);
             // 新しいメッシュを作成
@@ -143,6 +161,30 @@ namespace MeshDeletionTool
                 return false;
             }
             return true;
+        }
+
+        // アルファ境界付近の三角形を細分化したメッシュを返すメソッド（処理対象のサブメッシュのみ判定する）
+        private Mesh RefineMeshAroundAlphaBoundary(Mesh originalMesh, Material[] originalMaterials)
+        {
+            // 処理対象サブメッシュのテクスチャを集める（対象外は null）
+            Texture2D[] subMeshTextures = new Texture2D[originalMesh.subMeshCount];
+            for (int subMeshIndex = 0; subMeshIndex < originalMesh.subMeshCount; subMeshIndex++)
+            {
+                if (!subMeshVisibility.TryGetValue(subMeshIndex, out bool isTarget) || !isTarget)
+                    continue;
+                Material material = originalMaterials[subMeshIndex];
+                Texture2D texture = material != null ? material.mainTexture as Texture2D : null;
+                if (texture == null)
+                    continue;
+                MakeTextureReadable(texture);   //テクスチャ読み取り有効化
+                subMeshTextures[subMeshIndex] = texture;
+            }
+
+            AlphaBoundaryRefiner refiner = new AlphaBoundaryRefiner { MaxDepth = refineMaxDepth };
+            Mesh refinedMesh = refiner.Refine(originalMesh, subMeshTextures, alphaThreshold);
+            Debug.Log("境界の細分化: 三角形 " + originalMesh.triangles.Length / 3 + " → " + refinedMesh.triangles.Length / 3 +
+                      " (深さ毎の三角形数: " + string.Join(", ", refiner.TriangleCountPerDepth) + ")");
+            return refinedMesh;
         }
 
         // テクスチャに基づいて削除すべき頂点のインデックスを取得するメソッド

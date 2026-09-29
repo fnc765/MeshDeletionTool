@@ -107,4 +107,20 @@ public class AlphaMaskTest
         float reversed = AlphaSampling.FindAlphaBoundary(mask, right, left, 0.5f);
         Assert.AreEqual(expected, 1f - reversed, 2f / 1024f);
     }
+
+    [Test]
+    public void BuildOpaqueTable_MatchesAlphaComparison()
+    {
+        AlphaMask mask = HalfOpaque(4, 4);
+        foreach (float threshold in new[] { 0f, 0.001f, 0.5f, 127 / 255f, 128 / 255f, 1f })
+        {
+            bool[] table = mask.BuildOpaqueTable(threshold);
+            Assert.AreEqual(256, table.Length);
+            for (int value = 0; value < 256; value++)
+            {
+                Assert.AreEqual(value / 255f >= threshold, table[value], "value " + value + " threshold " + threshold);
+            }
+        }
+        Assert.AreEqual(mask.AlphaByte(3, 1), mask.AlphaByteUnchecked(3, 1));
+    }
 }

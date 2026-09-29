@@ -60,6 +60,24 @@ namespace MeshDeletionTool
             return alpha[y * Width + x];
         }
 
+        // アルファ値（0〜255）ごとに「alphaThreshold 以上（不透明）か」を表す 256 個の表
+        // 多数のテクセルを判定するとき、テクセル毎の Alpha(x, y) >= alphaThreshold と同じ結果をバイト値の参照だけで得る
+        public bool[] BuildOpaqueTable(float alphaThreshold)
+        {
+            bool[] table = new bool[256];
+            for (int value = 0; value < 256; value++)
+            {
+                table[value] = value / 255f >= alphaThreshold;
+            }
+            return table;
+        }
+
+        // 範囲内のテクセル座標のアルファ値（0〜255）。範囲外の判定を省いた内側のループ用（x, y は範囲内であること）
+        public byte AlphaByteUnchecked(int x, int y)
+        {
+            return alpha[y * Width + x];
+        }
+
         // UV座標が示すテクセルのアルファ値（テクセル座標の求め方は既存処理と同じ: (int)(u * (幅 - 1))）
         public float AlphaAt(Vector2 uv)
         {

@@ -154,6 +154,24 @@ namespace MeshDeletionTool
             return result;
         }
 
+        // 別の MeshData の index 番目の頂点の属性を追加する（GetElementAt + Add と同じだが、途中の MeshData を作らない）
+        public void AddElementAt(MeshData source, int index)
+        {
+            if (index < source.Vertices.Count) Vertices.Add(source.Vertices[index]);
+            if (index < source.Normals.Count) Normals.Add(source.Normals[index]);
+            if (index < source.Tangents.Count) Tangents.Add(source.Tangents[index]);
+            if (index < source.UV.Count) UV.Add(source.UV[index]);
+            if (index < source.UV2.Count) UV2.Add(source.UV2[index]);
+            if (index < source.UV3.Count) UV3.Add(source.UV3[index]);
+            if (index < source.UV4.Count) UV4.Add(source.UV4[index]);
+            if (index < source.UV5.Count) UV5.Add(source.UV5[index]);
+            if (index < source.UV6.Count) UV6.Add(source.UV6[index]);
+            if (index < source.UV7.Count) UV7.Add(source.UV7[index]);
+            if (index < source.UV8.Count) UV8.Add(source.UV8[index]);
+            if (index < source.Colors.Count) Colors.Add(source.Colors[index]);
+            if (index < source.BoneWeights.Count) BoneWeights.Add(source.BoneWeights[index]);
+        }
+
         // メッシュの index 番目の頂点の属性を追加する（メッシュに無い属性は追加しない）
         public void AddElementFromMesh(MeshArrays mesh, int index)
         {

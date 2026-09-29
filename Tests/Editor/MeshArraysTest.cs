@@ -76,4 +76,15 @@ public class MeshArraysTest
         Assert.AreEqual(new Vector3(3, 2, 5), bounds.max);
         Assert.AreEqual(new Bounds(), new MeshArrays().CalculateBounds());
     }
+
+    [Test]
+    public void QuantizeColors_RoundsToEightBits()
+    {
+        MeshArrays mesh = new MeshArrays { Colors = new[] { new Color(0.5f, 0.001f, 0.999f, 1f), new Color(2f, -1f, 0.25f, 0f) } };
+        mesh.QuantizeColors();
+        Assert.AreEqual(new Color(128 / 255f, 0f, 255 / 255f, 1f), mesh.Colors[0]);
+        Assert.AreEqual(new Color(1f, 0f, 64 / 255f, 0f), mesh.Colors[1]);   // 0〜1 に制限される
+        mesh.QuantizeColors();   // 2 回目は変化しない
+        Assert.AreEqual(new Color(128 / 255f, 0f, 255 / 255f, 1f), mesh.Colors[0]);
+    }
 }

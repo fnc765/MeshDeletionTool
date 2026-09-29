@@ -36,6 +36,14 @@ namespace MeshDeletionTool
         // 実行結果: サブメッシュ毎の、細分化後の三角形番号 → 元のメッシュの三角形番号（細分化が無ければ恒等）
         public List<int[]> ParentTriangleIndexPerSubMesh = new List<int[]>();
 
+        // 実行結果（診断用）: 多角形の内部にあるか判定したテクセルの数と、そのうち不透明か判定したテクセルの数
+        public long RasterTexelTests;
+        public long RasterInsideTexels;
+
+        // 不透明判定の表（アルファ値 → 閾値以上か）。閾値ごとに作り直す
+        private bool[] opaqueTable;
+        private float opaqueTableThreshold;
+
         // アルファ境界付近の三角形を細分化したメッシュを返す
         // subMeshMasks[i] が null のサブメッシュは判定対象外（隣接する辺の分割にのみ追従する）
         // 細分化が不要な場合は元のメッシュをそのまま返す
@@ -44,6 +52,8 @@ namespace MeshDeletionTool
             TriangleCountPerDepth.Clear();
             MarkedTriangleCountPerDepth.Clear();
             ParentTriangleIndexPerSubMesh = CreateIdentityParents(mesh);
+            RasterTexelTests = RasterInsideTexels = 0;
+            opaqueTable = null;
 
             MeshArrays currentMesh = mesh;
             for (int depth = 0; depth < MaxDepth; depth++)
@@ -192,9 +202,10 @@ namespace MeshDeletionTool
             int height = mask.Height;
 
             // 既存処理と同じテクセル座標系 (x = u * (w - 1), y = v * (h - 1)) に変換し、バウンディングボックスを求める
-            Vector2[] points = new Vector2[polygon.Count];
+            int pointCount = polygon.Count;
+            Vector2[] points = new Vector2[pointCount];
             float minX = float.MaxValue, minY = float.MaxValue, maxX = float.MinValue, maxY = float.MinValue;
-            for (int i = 0; i < polygon.Count; i++)
+            for (int i = 0; i < pointCount; i++)
             {
                 points[i] = new Vector2(polygon[i].x * (width - 1), polygon[i].y * (height - 1));
                 minX = Mathf.Min(minX, points[i].x);
@@ -205,10 +216,10 @@ namespace MeshDeletionTool
 
             // 多角形の向き（面積0なら内部のテクセルは無い）
             float signedArea = 0f;
-            for (int i = 0; i < points.Length; i++)
+            for (int i = 0; i < pointCount; i++)
             {
                 Vector2 p = points[i];
-                Vector2 q = points[(i + 1) % points.Length];
+                Vector2 q = points[(i + 1) % pointCount];
                 signedArea += p.x * q.y - q.x * p.y;
             }
             if (Mathf.Approximately(signedArea, 0f))
@@ -226,17 +237,49 @@ namespace MeshDeletionTool
             // 巨大な多角形は間引いてサンプリングする
             int stride = Mathf.Max(1, Mathf.CeilToInt(Mathf.Max(x1 - x0 + 1, y1 - y0 + 1) / (float)MaxRasterSize));
 
+            // 各辺の始点と方向を先に求める（テクセル毎の内外判定 (q - p) × (c - p) の式そのものは変えない）
+            float[] edgeX = new float[pointCount], edgeY = new float[pointCount], edgeDx = new float[pointCount], edgeDy = new float[pointCount];
+            for (int i = 0; i < pointCount; i++)
+            {
+                Vector2 p = points[i];
+                Vector2 q = points[(i + 1) % pointCount];
+                edgeX[i] = p.x;
+                edgeY[i] = p.y;
+                edgeDx[i] = q.x - p.x;
+                edgeDy[i] = q.y - p.y;
+            }
+            if (opaqueTable == null || opaqueTableThreshold != alphaThreshold)
+            {
+                opaqueTable = mask.BuildOpaqueTable(alphaThreshold);
+                opaqueTableThreshold = alphaThreshold;
+            }
+            bool[] opaque = opaqueTable;
+
             int count = 0;
             for (int y = y0; y <= y1; y += stride)
             {
+                float centerY = y + 0.5f;
                 for (int x = x0; x <= x1; x += stride)
                 {
                     // テクセルの中心が多角形の内部にあるか
-                    if (!IsInsideConvexPolygon(points, orientation, new Vector2(x + 0.5f, y + 0.5f)))
+                    float centerX = x + 0.5f;
+                    RasterTexelTests++;
+                    bool inside = true;
+                    for (int i = 0; i < pointCount; i++)
+                    {
+                        float cross = edgeDx[i] * (centerY - edgeY[i]) - edgeDy[i] * (centerX - edgeX[i]);
+                        if (cross * orientation < 0f)
+                        {
+                            inside = false;
+                            break;
+                        }
+                    }
+                    if (!inside)
                     {
                         continue;
                     }
-                    if (mask.Alpha(x, y) >= alphaThreshold)
+                    RasterInsideTexels++;
+                    if (opaque[mask.AlphaByteUnchecked(x, y)])
                     {
                         count++;
                         if (count >= stopAt)
@@ -247,22 +290,6 @@ namespace MeshDeletionTool
                 }
             }
             return count;
-        }
-
-        // 点が凸多角形の内部（境界を含む）にあるか判定する
-        private static bool IsInsideConvexPolygon(Vector2[] points, float orientation, Vector2 point)
-        {
-            for (int i = 0; i < points.Length; i++)
-            {
-                Vector2 p = points[i];
-                Vector2 q = points[(i + 1) % points.Length];
-                float cross = (q.x - p.x) * (point.y - p.y) - (q.y - p.y) * (point.x - p.x);
-                if (cross * orientation < 0f)
-                {
-                    return false;
-                }
-            }
-            return true;
         }
 
         // 辺のキー（頂点インデックスの昇順ペア）

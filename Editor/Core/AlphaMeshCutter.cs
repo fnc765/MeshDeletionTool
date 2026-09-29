@@ -294,7 +294,7 @@ namespace MeshDeletionTool
                 {
                     (MeshData newMeshDataVertex, (int, int, float) interpolation) =
                         AddEdgeIntersectionPoints(originalMesh, mask, sideIndexs[triangleIndex]);
-                    if (newMeshDataVertex.Vertices.Count > 0) // テクスチャ境界値があるなら
+                    if (newMeshDataVertex != null) // テクスチャ境界値があるなら
                     {
                         // ２つの頂点（インデックス昇順）と重みを保存
                         localVertexInterpolation.Add(interpolation);
@@ -306,7 +306,7 @@ namespace MeshDeletionTool
             return (addMeshData, localVertexInterpolation, crossedSides);
         }
 
-        // originalMeshのエッジとテクスチャの境界点を検出し、新しい頂点のMeshDataと補完情報（両端の頂点インデックス昇順, 重み）を返す関数
+        // originalMeshのエッジとテクスチャの境界点を検出し、新しい頂点のMeshData（境界点が無ければ null）と補完情報（両端の頂点インデックス昇順, 重み）を返す関数
         private (MeshData, (int, int, float)) AddEdgeIntersectionPoints(MeshArrays originalMesh, AlphaMask mask, int[] indexs)
         {
             // エッジの両端点を頂点インデックスの昇順に並べる
@@ -316,7 +316,7 @@ namespace MeshDeletionTool
             // エッジの両端点のUV座標を取得
             Vector2 uv1 = originalMesh.UV[edge[0]];
             Vector2 uv2 = originalMesh.UV[edge[1]];
-            MeshData newMeshDataVertex = new MeshData();
+            MeshData newMeshDataVertex = null;
             float weight = 0;
 
             // エッジが境界エッジかどうかを判定
@@ -393,7 +393,7 @@ namespace MeshDeletionTool
                 }
                 else
                 {
-                    newMeshData.Add(addMeshData.GetElementAt(j));
+                    newMeshData.AddElementAt(addMeshData, j);
                     int newIndex = newMeshData.Vertices.Count - 1;
                     edgeVertexIndexMap[(indexA, indexB)] = newIndex;
                     polygonToGlobalIndexMap.Add(newIndex);

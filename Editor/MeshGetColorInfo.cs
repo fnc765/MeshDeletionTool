@@ -72,10 +72,10 @@ namespace MeshGetColorInfo
 
             for (int i = 0; i < materials.Length; i++)
             {
-                Texture2D texture = materials[i].mainTexture as Texture2D;
+                Texture2D texture = materials[i] != null ? materials[i].mainTexture as Texture2D : null;
                 if (texture == null)
                 {
-                    Debug.LogError("マテリアルにテクスチャがアタッチされていません。");
+                    Debug.LogError("サブメッシュ " + i + " のマテリアルにテクスチャがアタッチされていません。");
                     continue;
                 }
 

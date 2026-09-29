@@ -96,8 +96,12 @@ namespace MeshDeletionTool
             return MeshArraysUnityAdapter.ToMesh(newArrays);
         }
 
+        // テクスチャのインポート設定を読み取り可能にする（既に読み取り可能なら何もしない。設定は元に戻さない: 診断用の MeshGetColorInfo が使う。
+        // メッシュ削除の処理は読み出す間だけ変更して元に戻す TemporaryReadableTextures を使う）
         protected void MakeTextureReadable(Texture2D texture)
         {
+            if (texture == null || texture.isReadable)
+                return;
             string path = AssetDatabase.GetAssetPath(texture);
             if (string.IsNullOrEmpty(path))
             {
@@ -109,7 +113,7 @@ namespace MeshDeletionTool
             if (textureImporter != null)
             {
                 textureImporter.isReadable = true;
-                AssetDatabase.ImportAsset(path, ImportAssetOptions.ForceUpdate);
+                textureImporter.SaveAndReimport();
                 Debug.Log($"テクスチャ '{texture.name}' の読み取り可能設定を有効にしました。");
             }
             else

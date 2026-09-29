@@ -89,35 +89,20 @@ namespace MeshDeletionTool
             text.AppendLine("CPU: " + SystemInfo.processorType + " x" + SystemInfo.processorCount + ", Unity " + Application.unityVersion);
 
             // 入力（テクスチャの読み出しとメッシュの読み出しは Unity 側の処理として別に測る）
+            // テクスチャはツール本体と同じ経路で読む: 読み出す間だけインポート設定を読み取り可能・非圧縮に変更し、読み終えたら元に戻す
             Stopwatch stopwatch = Stopwatch.StartNew();
-            bool[] targetSubMeshes = new bool[originalMesh.subMeshCount];
-            AlphaMask[] subMeshMasks = new AlphaMask[originalMesh.subMeshCount];
-            Dictionary<Texture2D, AlphaMask> maskCache = new Dictionary<Texture2D, AlphaMask>();
-            for (int subMeshIndex = 0; subMeshIndex < originalMesh.subMeshCount; subMeshIndex++)
-            {
-                Material material = subMeshIndex < originalMaterials.Length ? originalMaterials[subMeshIndex] : null;
-                Texture2D texture = material != null ? material.mainTexture as Texture2D : null;
-                if (texture == null)
-                    continue;
-                if (!maskCache.TryGetValue(texture, out AlphaMask mask))
-                {
-                    if (!texture.isReadable)
-                        MakeTextureReadable(texture);
-                    mask = MeshArraysUnityAdapter.FromTexture(texture);
-                    maskCache[texture] = mask;
-                }
-                subMeshMasks[subMeshIndex] = mask;
-                targetSubMeshes[subMeshIndex] = true;
-            }
+            bool[] targetSubMeshes = MeshDeletionToolForTexture.SubMeshesWithTexture(originalMesh.subMeshCount, originalMaterials);
+            AlphaMask[] subMeshMasks = MeshDeletionToolForTexture.CollectAlphaMasks(originalMesh.subMeshCount, originalMaterials, targetSubMeshes);
             double textureMs = stopwatch.Elapsed.TotalMilliseconds;
             stopwatch.Restart();
             MeshArrays sourceArrays = MeshArraysUnityAdapter.FromMesh(originalMesh);
             double fromMeshMs = stopwatch.Elapsed.TotalMilliseconds;
-            long texelCount = maskCache.Values.Sum(m => (long)m.Width * m.Height);
+            List<AlphaMask> distinctMasks = subMeshMasks.Where(m => m != null).Distinct().ToList();
+            long texelCount = distinctMasks.Sum(m => (long)m.Width * m.Height);
             text.AppendLine("入力: " + originalMesh.name + " " + sourceArrays.VertexCount.ToString("#,0") + " 頂点 / " + sourceArrays.TriangleCount.ToString("#,0") + " 三角形 / " +
                             originalMesh.subMeshCount + " サブメッシュ（対象 " + targetSubMeshes.Count(t => t) + "）/ " + sourceArrays.BlendShapes.Count + " シェイプ / テクスチャ " +
-                            maskCache.Count + " 枚 " + texelCount.ToString("#,0") + " テクセル");
-            text.AppendLine("読み出し（Unity 側、1 回）: テクスチャ " + textureMs.ToString("0.0") + " ms, メッシュ " + fromMeshMs.ToString("0.0") + " ms");
+                            distinctMasks.Count + " 枚 " + texelCount.ToString("#,0") + " テクセル");
+            text.AppendLine("読み出し（Unity 側、1 回）: テクスチャ " + textureMs.ToString("0.0") + " ms（インポート設定の一時変更と復元を含む）, メッシュ " + fromMeshMs.ToString("0.0") + " ms");
             text.AppendLine("設定: 閾値 " + alphaThreshold + ", 細分化 " + (refineBoundary ? "あり（精度 " + boundaryPrecisionTexels + " テクセル, 深さ " + refineMaxDepth + ", 再結合 " + (mergeCutPolygons ? "あり" : "なし") + "）" : "なし") +
                             ", 計測 " + iterations + " 回（最初の 1 回は捨てる）");
             if (targetSubMeshes.Count(t => t) == 0)

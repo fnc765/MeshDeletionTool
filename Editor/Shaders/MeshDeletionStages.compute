@@ -313,7 +313,7 @@ bool RefineTest(MaskView m, float2 uv0, float2 uv1, float2 uv2, int i0, int i1, 
     return CountOpaqueTexels(m, polygon, pointCount, _ChordTolerance + 1) > _ChordTolerance;
 }
 
-// 要素 = (マスク番号, 頂点番号)。頂点が透明（アルファ値 < 閾値）なら 1
+// 要素 = (マスク番号, 頂点番号)。_ItemMask[マスク番号] が連結バッファ内のマスク番号。頂点が透明（アルファ値 < 閾値）なら 1
 [numthreads(THREADS, 1, 1)]
 void ClassifyVertices(uint3 id : SV_DispatchThreadID)
 {
@@ -321,7 +321,7 @@ void ClassifyVertices(uint3 id : SV_DispatchThreadID)
     if (item >= _Count) return;
     int maskIndex = item / _VertexCount;
     int vertex = item - maskIndex * _VertexCount;
-    MaskView m = LoadMask(maskIndex);
+    MaskView m = LoadMask(_ItemMask[maskIndex]);
     _OutFlags[item] = SampleClass(m, _UV[vertex]) == 0u ? 1 : 0;
 }
 

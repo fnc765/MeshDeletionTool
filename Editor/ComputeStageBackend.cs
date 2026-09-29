@@ -95,27 +95,21 @@ namespace MeshDeletionTool
             int[] flags = new int[count];
             if (count > 0)
             {
-                // 要素番号 = 連結バッファ内のマスク番号 × 頂点数 + 頂点番号。distinct の並びと連結バッファの並びが違うことがあるので、
-                // 連結バッファの先頭から distinct の数だけ使えるように、キャッシュを distinct の順に作る（EnsureMasks が保証する）
+                // 要素番号 = distinct 内のマスク番号 × 頂点数 + 頂点番号。カーネルは _ItemMask[distinct 内のマスク番号] で連結バッファ内のマスクを引くため、
+                // 連結バッファに distinct 以外のマスクが残っていても（並びが違っても）結果は distinct の順に並ぶ
                 Stopwatch stopwatch = Stopwatch.StartNew();
                 EnsureUV(uvs);
                 EnsureAlphaClass(alphaThreshold);
+                using (ComputeBuffer itemMaskBuffer = new ComputeBuffer(maskIndexInPack.Length, sizeof(int)))
                 using (ComputeBuffer outFlags = new ComputeBuffer(count, sizeof(int)))
                 {
+                    itemMaskBuffer.SetData(maskIndexInPack);
                     shader.SetInt("_VertexCount", vertexCount);
-                    Bind(classifyKernel, dummyBuffer, dummyBuffer, outFlags, dummyBuffer);
+                    Bind(classifyKernel, dummyBuffer, itemMaskBuffer, outFlags, dummyBuffer);
                     Dispatch(classifyKernel, count);
                     outFlags.GetData(flags);
                 }
                 Record("ClassifyVertices", count, stopwatch);
-                // 連結バッファ内のマスク番号 → distinct 内の番号に並べ直す
-                if (!IsIdentity(maskIndexInPack))
-                {
-                    int[] reordered = new int[count];
-                    for (int k = 0; k < distinct.Length; k++)
-                        Array.Copy(flags, maskIndexInPack[k] * vertexCount, reordered, k * vertexCount, vertexCount);
-                    flags = reordered;
-                }
             }
             return StageBatch.SplitVertexFlags(flags, vertexCount, distinct.Length, maskIndexPerSet);
         }
@@ -241,15 +235,6 @@ namespace MeshDeletionTool
                 result[k] = maskIndexPerSet[k] < 0 ? -1 : maskIndexInPack[maskIndexPerSet[k]];
             }
             return result;
-        }
-
-        private static bool IsIdentity(int[] map)
-        {
-            for (int k = 0; k < map.Length; k++)
-            {
-                if (map[k] != k) return false;
-            }
-            return true;
         }
 
         private void EnsureUV(Vector2[] uvs)

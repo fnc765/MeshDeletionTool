@@ -32,9 +32,14 @@ namespace MeshDeletionTool
         // 進行状況の記録先（Debug.Log 相当。null なら記録しない）
         public Action<string> Log;
 
-        // 要素毎の判定（頂点の透明判定、三角形の細分化判定、辺上の境界点の二分探索）の実行先。既定は CPU
+        // 要素毎の判定（頂点の透明判定、三角形の細分化判定、辺上の境界点の二分探索）の実行先。未設定なら初めて使うときに CPU を作る
         // GPU（ComputeStageBackend）を指定しても結果は同じになる。所有者が Dispose する
-        public IAlphaStageBackend Backend = new CpuStageBackend();
+        private IAlphaStageBackend backend;
+        public IAlphaStageBackend Backend
+        {
+            get => backend ?? (backend = new CpuStageBackend());
+            set => backend = value;
+        }
 
         // 各処理段の時間を StageTimings に記録する（ベンチマーク・「時間を計測」用）
         public bool MeasureTime;

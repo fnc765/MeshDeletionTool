@@ -138,6 +138,7 @@ namespace MeshDeletionTool
             }
         }
 
+        // 出力メッシュを固定のパスに保存する（前回の出力は上書きされる）
         protected void SaveNewMesh(Mesh newMesh)
         {
             AssetDatabase.CreateAsset(newMesh, "Assets/NewMesh.asset");

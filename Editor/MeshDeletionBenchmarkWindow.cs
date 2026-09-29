@@ -149,11 +149,11 @@ namespace MeshDeletionTool
             {
                 text.AppendLine("| " + stage + " | " + string.Join(" | ", results.Select(r => Median(r.StageRuns.Select(run => run.TryGetValue(stage, out double v) ? v : 0.0)).ToString("0.0"))) + " |");
             }
-            text.AppendLine("| **合計** | " + string.Join(" | ", results.Select(r => Median(r.Totals).ToString("0.0"))) + " |");
+            text.AppendLine("| 合計 | " + string.Join(" | ", results.Select(r => Median(r.Totals).ToString("0.0"))) + " |");
             List<string> kernelNames = results.SelectMany(r => r.KernelRuns.SelectMany(run => run.Keys)).Distinct().ToList();
             foreach (string kernel in kernelNames)
             {
-                text.AppendLine("| &nbsp;&nbsp;カーネル " + kernel + " | " + string.Join(" | ", results.Select(r =>
+                text.AppendLine("|   カーネル " + kernel + " | " + string.Join(" | ", results.Select(r =>
                     r.KernelCounts.TryGetValue(kernel, out (int Calls, long Elements) c)
                         ? Median(r.KernelRuns.Select(run => run.TryGetValue(kernel, out double v) ? v : 0.0)).ToString("0.0") + " (" + c.Calls + " 回, " + c.Elements.ToString("#,0") + " 要素)"
                         : "-")) + " |");

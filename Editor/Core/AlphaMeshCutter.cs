@@ -12,8 +12,13 @@ namespace MeshDeletionTool
         // アルファ値がこの値より小さいメッシュは削除する
         public float AlphaThreshold = 0.5F;
 
-        // 要素毎の判定（頂点の透明判定、辺上の境界点の二分探索）の実行先。既定は CPU。GPU（ComputeStageBackend）でも同じ結果になる
-        public IAlphaStageBackend Backend = new CpuStageBackend();
+        // 要素毎の判定（頂点の透明判定、辺上の境界点の二分探索）の実行先。未設定なら初めて使うときに CPU を作る。GPU（ComputeStageBackend）でも同じ結果になる
+        private IAlphaStageBackend backend;
+        public IAlphaStageBackend Backend
+        {
+            get => backend ?? (backend = new CpuStageBackend());
+            set => backend = value;
+        }
 
         // テクスチャに基づいて削除すべき頂点のインデックスを取得するメソッド（降順）
         public List<int> GetVerticesToRemove(MeshArrays originalMesh, AlphaMask[] subMeshMasks)

@@ -49,6 +49,7 @@ namespace MeshDeletionTool
             WarnIfBonesPerVertexExceedFour(originalMesh);
             List<int> removeVerticesIndexs = GetVerticesToRemove(targetRenderer, originalMesh, deletionBounds);
             Mesh newMesh = CreateMeshAfterVertexRemoval(originalMesh, removeVerticesIndexs);
+            newMesh.name = originalMesh.name + "_deleted";
             SaveNewMesh(newMesh);
         }
 

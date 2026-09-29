@@ -321,8 +321,9 @@ namespace MeshDeletionTool
             }
             lastOutputTriangleParents = pipeline.OutputTriangleParents;
 
-            // 新しいメッシュを作成して保存
+            // 新しいメッシュを作成して保存（メッシュ名は元のメッシュ名 + "_deleted"。アセットのパスは従来通り固定）
             Mesh newMesh = MeshArraysUnityAdapter.ToMesh(newArrays);
+            newMesh.name = originalMesh.name + "_deleted";
             SaveNewMesh(newMesh);
         }
 

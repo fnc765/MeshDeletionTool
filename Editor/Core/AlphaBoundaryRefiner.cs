@@ -40,8 +40,13 @@ namespace MeshDeletionTool
         public long RasterTexelTests;
         public long RasterInsideTexels;
 
-        // 要素毎の判定（三角形の細分化判定）の実行先。既定は CPU。GPU（ComputeStageBackend）でも同じ結果になる
-        public IAlphaStageBackend Backend = new CpuStageBackend();
+        // 要素毎の判定（三角形の細分化判定）の実行先。未設定なら初めて使うときに CPU を作る。GPU（ComputeStageBackend）でも同じ結果になる
+        private IAlphaStageBackend backend;
+        public IAlphaStageBackend Backend
+        {
+            get => backend ?? (backend = new CpuStageBackend());
+            set => backend = value;
+        }
 
         // アルファ境界付近の三角形を細分化したメッシュを返す
         // subMeshMasks[i] が null のサブメッシュは判定対象外（隣接する辺の分割にのみ追従する）

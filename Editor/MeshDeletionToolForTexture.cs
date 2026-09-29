@@ -75,6 +75,10 @@ namespace MeshDeletionTool
             // 対象オブジェクトを選択するためのフィールド
             targetRenderer = EditorGUILayout.ObjectField("対象オブジェクト", targetRenderer, typeof(Renderer), true) as Renderer;
 
+            // 対象オブジェクトの Mesh とマテリアルは 1 回の描画で一度だけ取得する（無いときのエラーログを重ねて出さない）
+            Mesh originalMesh = targetRenderer != null ? GetOriginalMesh(targetRenderer) : null;
+            Material[] originalMaterials = targetRenderer != null ? GetOriginalMaterials(targetRenderer) : null;
+
             // アルファ閾値を指定するスライダーを追加
             GUILayout.Label("\n②アルファ閾値を設定", EditorStyles.boldLabel);
             alphaThreshold = EditorGUILayout.Slider("アルファ閾値", alphaThreshold, 0f, 1f);
@@ -87,7 +91,7 @@ namespace MeshDeletionTool
             simplifyToleranceTexels = boundaryPrecisionTexels;
             if (targetRenderer != null)
             {
-                string texelSizeHint = GetTexelSizeHint(GetOriginalMesh(targetRenderer), GetOriginalMaterials(targetRenderer));
+                string texelSizeHint = GetTexelSizeHint(originalMesh, originalMaterials);
                 if (texelSizeHint != null)
                 {
                     EditorGUILayout.LabelField(" ", texelSizeHint, EditorStyles.miniLabel);
@@ -109,9 +113,6 @@ namespace MeshDeletionTool
 
             if (targetRenderer != null)
             {
-                Mesh originalMesh = GetOriginalMesh(targetRenderer);
-                Material[] originalMaterials = GetOriginalMaterials(targetRenderer);
-
                 if (originalMesh != null)
                 {
                     for (int i = 0; i < originalMesh.subMeshCount; i++)

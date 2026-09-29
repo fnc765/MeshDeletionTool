@@ -281,11 +281,7 @@ namespace MeshDeletionTool
 
             // テクスチャのアルファ値とメッシュの頂点属性を一度だけ読み出す
             bool[] targetSubMeshes = GetTargetSubMeshes(originalMesh.subMeshCount);
-            if (refineBoundary && refineMaxDepth > 0)
-            {
-                MakeTargetTexturesReadable(originalMesh.subMeshCount, originalMaterials, targetSubMeshes);
-            }
-            AlphaMask[] subMeshMasks = CollectAlphaMasks(originalMesh.subMeshCount, originalMaterials);
+            AlphaMask[] subMeshMasks = CollectAlphaMasks(originalMesh.subMeshCount, originalMaterials, targetSubMeshes);
             MeshArrays sourceArrays = MeshArraysUnityAdapter.FromMesh(originalMesh);
 
             // 要素毎の判定の実行先（GPU が使えなければ CPU）
@@ -355,40 +351,42 @@ namespace MeshDeletionTool
             return targets;
         }
 
-        // 処理対象サブメッシュのテクスチャの読み取りを有効化する（境界の細分化が行う判定のため）
-        private void MakeTargetTexturesReadable(int subMeshCount, Material[] originalMaterials, bool[] targetSubMeshes)
+        // 処理対象サブメッシュのテクスチャのアルファ値の読み出し（対象外のサブメッシュとテクスチャの無いサブメッシュは null）
+        // Texture2D.GetPixel は呼び出し毎にネイティブ呼び出しになるため、GetPixels32 で一度だけ読む。同じテクスチャは一度だけ読む
+        // 読み出す間だけインポート設定を読み取り可能・非圧縮に変更し（圧縮テクスチャのアルファ値は近似値になるため）、読み終えたら元に戻す
+        private AlphaMask[] CollectAlphaMasks(int subMeshCount, Material[] originalMaterials, bool[] targetSubMeshes)
         {
+            Texture2D[] subMeshTextures = new Texture2D[subMeshCount];
+            List<Texture2D> distinctTextures = new List<Texture2D>();
             for (int subMeshIndex = 0; subMeshIndex < subMeshCount; subMeshIndex++)
             {
                 if (!targetSubMeshes[subMeshIndex])
                     continue;
-                Material material = originalMaterials[subMeshIndex];
+                Material material = subMeshIndex < originalMaterials.Length ? originalMaterials[subMeshIndex] : null;
                 Texture2D texture = material != null ? material.mainTexture as Texture2D : null;
                 if (texture == null)
                     continue;
-                MakeTextureReadable(texture);   //テクスチャ読み取り有効化
+                subMeshTextures[subMeshIndex] = texture;
+                if (!distinctTextures.Contains(texture))
+                    distinctTextures.Add(texture);
             }
-        }
 
-        // メッシュに使用されているテクスチャ読み取りの有効化と、サブメッシュ毎のテクスチャのアルファ値の読み出し
-        // （Texture2D.GetPixel は呼び出し毎にネイティブ呼び出しになるため、GetPixels32 で一度だけ読む。同じテクスチャは一度だけ読む）
-        private AlphaMask[] CollectAlphaMasks(int subMeshCount, Material[] originalMaterials)
-        {
             AlphaMask[] subMeshMasks = new AlphaMask[subMeshCount];
             Dictionary<Texture2D, AlphaMask> maskCache = new Dictionary<Texture2D, AlphaMask>();
-            for (int subMeshIndex = 0; subMeshIndex < subMeshCount; subMeshIndex++)
+            using (TemporaryReadableTextures readableTextures = new TemporaryReadableTextures(distinctTextures))
             {
-                Material material = originalMaterials[subMeshIndex];
-                Texture2D texture = material.mainTexture as Texture2D;
-                MakeTextureReadable(texture);   //テクスチャ読み取り有効化
-                if (texture == null)
-                    continue;
-                if (!maskCache.TryGetValue(texture, out AlphaMask mask))
+                for (int subMeshIndex = 0; subMeshIndex < subMeshCount; subMeshIndex++)
                 {
-                    mask = MeshArraysUnityAdapter.FromTexture(texture);
-                    maskCache[texture] = mask;
+                    Texture2D texture = subMeshTextures[subMeshIndex];
+                    if (texture == null)
+                        continue;
+                    if (!maskCache.TryGetValue(texture, out AlphaMask mask))
+                    {
+                        mask = readableTextures.CanRead(texture) ? MeshArraysUnityAdapter.FromTexture(texture) : null;
+                        maskCache[texture] = mask;
+                    }
+                    subMeshMasks[subMeshIndex] = mask;
                 }
-                subMeshMasks[subMeshIndex] = mask;
             }
             return subMeshMasks;
         }

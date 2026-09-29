@@ -266,6 +266,7 @@ namespace MeshDeletionTool
             Material[] originalMaterials = GetOriginalMaterials(targetRenderer);
             if (originalMesh == null)
                 return;
+            WarnIfBonesPerVertexExceedFour(originalMesh);
             Mesh sourceMesh = originalMesh;   // 細分化前の元のメッシュ
 
             // 境界の細分化（削除処理の前に、アルファ境界付近の三角形を細分化したメッシュに置き換える）

@@ -61,6 +61,33 @@ namespace MeshDeletionTool
             return removeVerticesIndexs;
         }
 
+        // 1頂点あたりのボーン数が4を超える頂点があれば警告する
+        // 本ツールは4ボーン固定の Mesh.boneWeights で読み書きするため、5番目以降のウェイトは出力メッシュから失われる
+        // （Mesh.GetBonesPerVertex は Unity 2019.1 以降）
+        protected void WarnIfBonesPerVertexExceedFour(Mesh mesh)
+        {
+            if (mesh == null)
+                return;
+
+            var bonesPerVertex = mesh.GetBonesPerVertex();
+            int exceedingCount = 0;
+            int maxBones = 0;
+            foreach (byte bones in bonesPerVertex)
+            {
+                if (bones > 4)
+                {
+                    exceedingCount++;
+                    maxBones = Mathf.Max(maxBones, bones);
+                }
+            }
+            if (exceedingCount > 0)
+            {
+                Debug.LogWarning("1頂点あたりのボーン数が4を超える頂点が " + exceedingCount + " 個あります（最大 " + maxBones + " ボーン）。" +
+                                 "本ツールは1頂点あたり4ボーンまでしか扱えないため、5番目以降のウェイトは出力メッシュから失われます。" +
+                                 "必要なら事前にウェイトを4ボーン以下に減らしてください。");
+            }
+        }
+
         protected Mesh CreateMeshAfterVertexRemoval(Mesh originalMesh, List<int> removeVerticesIndexs)
         {
             MeshData newMeshData = new MeshData();

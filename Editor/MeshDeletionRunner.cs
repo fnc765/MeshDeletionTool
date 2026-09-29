@@ -9,8 +9,9 @@ namespace MeshDeletionTool
     // ウィンドウ（MeshDeletionToolForTexture）とヘッドレスの呼び出しが共通に使う。保存はしない
     internal static class MeshDeletionRunner
     {
-        // Renderer が描いている Mesh（SkinnedMeshRenderer の sharedMesh、または MeshRenderer と同じオブジェクトの MeshFilter の sharedMesh）。無ければエラーを出して null
-        internal static Mesh GetOriginalMesh(Renderer targetRenderer)
+        // Renderer が描いている Mesh（SkinnedMeshRenderer の sharedMesh、または MeshRenderer と同じオブジェクトの MeshFilter の sharedMesh）
+        // 無ければ null（logError ならエラーも出す）
+        internal static Mesh GetOriginalMesh(Renderer targetRenderer, bool logError = true)
         {
             if (targetRenderer is SkinnedMeshRenderer skinnedMeshRenderer)
             {
@@ -25,12 +26,13 @@ namespace MeshDeletionTool
                 }
             }
 
-            Debug.LogError("対象オブジェクトに有効な SkinnedMeshRenderer または MeshRenderer コンポーネントがありません！");
+            if (logError)
+                Debug.LogError("対象オブジェクトに有効な SkinnedMeshRenderer または MeshRenderer コンポーネントがありません！");
             return null;
         }
 
-        // Renderer のマテリアル（サブメッシュ順）。無ければエラーを出して null
-        internal static Material[] GetOriginalMaterials(Renderer targetRenderer)
+        // Renderer のマテリアル（サブメッシュ順）。無ければ null（logError ならエラーも出す）
+        internal static Material[] GetOriginalMaterials(Renderer targetRenderer, bool logError = true)
         {
             if (targetRenderer is SkinnedMeshRenderer skinnedMeshRenderer)
             {
@@ -45,7 +47,8 @@ namespace MeshDeletionTool
                 }
             }
 
-            Debug.LogError("対象オブジェクトに有効な SkinnedMeshRenderer または MeshRenderer コンポーネントがありません！");
+            if (logError)
+                Debug.LogError("対象オブジェクトに有効な SkinnedMeshRenderer または MeshRenderer コンポーネントがありません！");
             return null;
         }
 

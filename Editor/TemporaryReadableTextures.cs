@@ -7,6 +7,7 @@ using UnityEngine.Experimental.Rendering;
 namespace MeshDeletionTool
 {
     // テクスチャのピクセルを読み出す間だけ、インポート設定を「読み取り可能・非圧縮」に変更する。Dispose で記録しておいた元の設定に戻し、再インポートする
+    // GPU 経由の読み出し（AlphaMaskReader）が使えないとき（-nographics、Blit / ReadPixels の失敗）だけ使う従来経路。
     // 圧縮されたテクスチャ（DXT5 など）の GetPixels32 は圧縮を展開した近似値を返すため、アルファ値を正確に読むには一時的に非圧縮にする必要がある
     // 既に読み取り可能で非圧縮なテクスチャは変更しない。アセットでないテクスチャ（TextureImporter が無いもの）は設定を変えられないため、
     // 読み取り可能ならそのまま読み、読み取り不可なら読めないもの（CanRead が false）として扱う

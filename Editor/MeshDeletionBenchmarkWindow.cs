@@ -74,7 +74,7 @@ namespace MeshDeletionTool
             public MeshArrays Output;
         }
 
-        // 計測して報告の文字列を返す。途中で例外が出ても報告に残す（バッファは Measure の finally で、テクスチャの設定は CollectAlphaMasks の using で戻る）
+        // 計測して報告の文字列を返す。途中で例外が出ても報告に残す（バッファは Measure の finally で解放される。テクスチャの読み出しはインポート設定を変更しない）
         private string Run()
         {
             if (targetRenderer == null)
@@ -109,10 +109,10 @@ namespace MeshDeletionTool
             text.AppendLine("CPU: " + SystemInfo.processorType + " x" + SystemInfo.processorCount + ", Unity " + Application.unityVersion);
 
             // 入力（テクスチャの読み出しとメッシュの読み出しは Unity 側の処理として別に測る）
-            // テクスチャはツール本体と同じ経路で読む: 読み出す間だけインポート設定を読み取り可能・非圧縮に変更し、読み終えたら元に戻す
+            // テクスチャはツール本体と同じ経路で読む（AlphaMaskReader: GPU 経由。GPU が使えないときだけインポート設定の一時変更）
             Stopwatch stopwatch = Stopwatch.StartNew();
             bool[] targetSubMeshes = MeshDeletionToolForTexture.SubMeshesWithTexture(originalMesh.subMeshCount, originalMaterials);
-            AlphaMask[] subMeshMasks = MeshDeletionToolForTexture.CollectAlphaMasks(originalMesh.subMeshCount, originalMaterials, targetSubMeshes);
+            AlphaMask[] subMeshMasks = MeshDeletionToolForTexture.CollectAlphaMasks(originalMesh.subMeshCount, originalMaterials, targetSubMeshes, out string readNote);
             double textureMs = stopwatch.Elapsed.TotalMilliseconds;
             stopwatch.Restart();
             MeshArrays sourceArrays = MeshArraysUnityAdapter.FromMesh(originalMesh);
@@ -122,7 +122,9 @@ namespace MeshDeletionTool
             text.AppendLine("入力: " + originalMesh.name + " " + sourceArrays.VertexCount.ToString("#,0") + " 頂点 / " + sourceArrays.TriangleCount.ToString("#,0") + " 三角形 / " +
                             originalMesh.subMeshCount + " サブメッシュ（対象 " + targetSubMeshes.Count(t => t) + "）/ " + sourceArrays.BlendShapes.Count + " シェイプ / テクスチャ " +
                             distinctMasks.Count + " 枚 " + texelCount.ToString("#,0") + " テクセル");
-            text.AppendLine("読み出し（Unity 側、1 回）: テクスチャ " + textureMs.ToString("0.0") + " ms（インポート設定の一時変更と復元を含む）, メッシュ " + fromMeshMs.ToString("0.0") + " ms");
+            text.AppendLine("読み出し（Unity 側、1 回）: テクスチャ " + textureMs.ToString("0.0") + " ms, メッシュ " + fromMeshMs.ToString("0.0") + " ms");
+            if (readNote != null)
+                text.AppendLine("  " + readNote);
             text.AppendLine("設定: 閾値 " + alphaThreshold + ", 細分化 " + (refineBoundary ? "あり（精度 " + boundaryPrecisionTexels + " テクセル, 深さ " + refineMaxDepth + ", 再結合 " + (mergeCutPolygons ? "あり" : "なし") + "）" : "なし") +
                             ", 計測 " + iterations + " 回（最初の 1 回は捨てる）");
             if (targetSubMeshes.Count(t => t) == 0)

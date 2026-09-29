@@ -416,10 +416,20 @@ namespace MeshDeletionTool
         // 処理対象サブメッシュのテクスチャのアルファ値の読み出し（対象外のサブメッシュとテクスチャの無いサブメッシュは null）
         // マテリアルが無い（数が足りない・空のスロット）、テクスチャが無い、テクスチャを読めないサブメッシュは例外にせず、1 行のログを出して
         // targetSubMeshes から外す（処理本体はテクスチャの無いサブメッシュを対象にできないため、対象と読み出し結果を常に一致させる）
-        // Texture2D.GetPixel は呼び出し毎にネイティブ呼び出しになるため、GetPixels32 で一度だけ読む。同じテクスチャは一度だけ読む
-        // 読み出す間だけインポート設定を読み取り可能・非圧縮に変更し（圧縮テクスチャのアルファ値は近似値になるため）、読み終えたら元に戻す
+        // 読み出しは AlphaMaskReader（GPU 経由。インポート設定は変更しない。GPU が使えないときだけインポート設定の一時変更）で、同じテクスチャは一度だけ読む
+        // 使った経路と時間は 1 行のログに出す
         internal static AlphaMask[] CollectAlphaMasks(int subMeshCount, Material[] originalMaterials, bool[] targetSubMeshes)
         {
+            AlphaMask[] masks = CollectAlphaMasks(subMeshCount, originalMaterials, targetSubMeshes, out string readNote);
+            if (readNote != null)
+                Debug.Log(readNote);
+            return masks;
+        }
+
+        // readNote に読み出しの経路と時間（1 行。読むテクスチャが無ければ null）を返す版
+        internal static AlphaMask[] CollectAlphaMasks(int subMeshCount, Material[] originalMaterials, bool[] targetSubMeshes, out string readNote)
+        {
+            readNote = null;
             Texture2D[] subMeshTextures = new Texture2D[subMeshCount];
             List<Texture2D> distinctTextures = new List<Texture2D>();
             for (int subMeshIndex = 0; subMeshIndex < subMeshCount; subMeshIndex++)
@@ -446,23 +456,18 @@ namespace MeshDeletionTool
             }
 
             AlphaMask[] subMeshMasks = new AlphaMask[subMeshCount];
-            Dictionary<Texture2D, AlphaMask> maskCache = new Dictionary<Texture2D, AlphaMask>();
-            using (TemporaryReadableTextures readableTextures = new TemporaryReadableTextures(distinctTextures))
+            if (distinctTextures.Count == 0)
+                return subMeshMasks;
+            Dictionary<Texture2D, AlphaMask> maskCache = AlphaMaskReader.Read(distinctTextures, out readNote);
+            for (int subMeshIndex = 0; subMeshIndex < subMeshCount; subMeshIndex++)
             {
-                for (int subMeshIndex = 0; subMeshIndex < subMeshCount; subMeshIndex++)
-                {
-                    Texture2D texture = subMeshTextures[subMeshIndex];
-                    if (texture == null)
-                        continue;
-                    if (!maskCache.TryGetValue(texture, out AlphaMask mask))
-                    {
-                        mask = readableTextures.CanRead(texture) ? MeshArraysUnityAdapter.FromTexture(texture) : null;
-                        maskCache[texture] = mask;
-                    }
-                    subMeshMasks[subMeshIndex] = mask;
-                    if (mask == null)
-                        targetSubMeshes[subMeshIndex] = false;   // 読めなかった理由は TemporaryReadableTextures が出している
-                }
+                Texture2D texture = subMeshTextures[subMeshIndex];
+                if (texture == null)
+                    continue;
+                maskCache.TryGetValue(texture, out AlphaMask mask);
+                subMeshMasks[subMeshIndex] = mask;
+                if (mask == null)
+                    targetSubMeshes[subMeshIndex] = false;   // 読めなかった理由は AlphaMaskReader / TemporaryReadableTextures が出している
             }
             return subMeshMasks;
         }

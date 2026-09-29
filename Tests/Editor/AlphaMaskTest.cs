@@ -26,6 +26,33 @@ public class AlphaMaskTest
         Assert.AreEqual(0, mask.AlphaByte(1, 1));
     }
 
+    // RGBA32 のバイト列（ReadPixels / GetRawTextureData、下の行から）からのアルファ値の取り出しは GetPixels32 と同じ並びになる
+    [Test]
+    public void FromRgba32_TakesAlphaAtSameIndexAsFromPixels()
+    {
+        const int width = 3, height = 2;
+        Color32[] pixels = new Color32[width * height];
+        byte[] rgba = new byte[width * height * 4];
+        for (int i = 0; i < pixels.Length; i++)
+        {
+            pixels[i] = new Color32((byte)(i * 7), (byte)(i * 11), (byte)(i * 13), (byte)(100 + i * 20));
+            rgba[i * 4 + 0] = pixels[i].r; rgba[i * 4 + 1] = pixels[i].g; rgba[i * 4 + 2] = pixels[i].b; rgba[i * 4 + 3] = pixels[i].a;
+        }
+        AlphaMask fromPixels = AlphaMask.FromPixels(pixels, width, height);
+        AlphaMask fromRgba = AlphaMask.FromRgba32(rgba, width, height, false);
+        for (int y = 0; y < height; y++)
+            for (int x = 0; x < width; x++)
+                Assert.AreEqual(fromPixels.AlphaByte(x, y), fromRgba.AlphaByte(x, y), "(" + x + ", " + y + ")");
+        Assert.AreEqual(100 + (1 * width + 2) * 20, fromRgba.AlphaByte(2, 1));
+
+        // 上下反転して取り込むと行が入れ替わる（上の行から並ぶ読み出し結果を下の行からの並びに直すため）
+        AlphaMask flipped = AlphaMask.FromRgba32(rgba, width, height, true);
+        for (int y = 0; y < height; y++)
+            for (int x = 0; x < width; x++)
+                Assert.AreEqual(fromPixels.AlphaByte(x, height - 1 - y), flipped.AlphaByte(x, y), "flipped (" + x + ", " + y + ")");
+        Assert.Throws<System.ArgumentException>(() => AlphaMask.FromRgba32(new byte[4], 2, 1, false));
+    }
+
     [Test]
     public void TexelCoordinates_UseSizeMinusOne()
     {

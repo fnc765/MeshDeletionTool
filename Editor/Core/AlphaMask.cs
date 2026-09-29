@@ -4,7 +4,7 @@ namespace MeshDeletionTool
 {
     // テクスチャのアルファ値だけを保持し、Texture2D.GetPixel と同じ規則でテクセルを参照するクラス
     // Texture2D の GetPixel は呼び出し毎にネイティブ呼び出しが必要で Unity の外では扱えないため、
-    // GetPixels32 で一度だけ読み出した結果を写し取り（MeshArraysUnityAdapter.FromTexture）、以後はこのクラスだけを参照する
+    // 一度だけ読み出した結果を写し取り（GPU 経由の AlphaMaskReader、または GetPixels32 の MeshArraysUnityAdapter.FromTexture）、以後はこのクラスだけを参照する
     public class AlphaMask
     {
         public readonly int Width;
@@ -40,6 +40,25 @@ namespace MeshDeletionTool
             for (int i = 0; i < pixels.Length; i++)
             {
                 alpha[i] = pixels[i].a;
+            }
+            return new AlphaMask(width, height, alpha);
+        }
+
+        // RGBA32（1 テクセル 4 バイト、R, G, B, A の順。GetRawTextureData / ReadPixels の並び）からアルファ値だけを取り出す
+        // 行の並びは GetPixels32 と同じ下の行から。flipY なら行を上下反転して取り込む（上の行から並ぶ読み出し結果を同じ並びに直す）
+        public static AlphaMask FromRgba32(byte[] rgba, int width, int height, bool flipY)
+        {
+            if (rgba == null || rgba.Length != width * height * 4)
+                throw new System.ArgumentException("RGBA32 配列の長さが width * height * 4 と一致しません。");
+            byte[] alpha = new byte[width * height];
+            for (int y = 0; y < height; y++)
+            {
+                int sourceRow = (flipY ? height - 1 - y : y) * width;
+                int targetRow = y * width;
+                for (int x = 0; x < width; x++)
+                {
+                    alpha[targetRow + x] = rgba[(sourceRow + x) * 4 + 3];
+                }
             }
             return new AlphaMask(width, height, alpha);
         }

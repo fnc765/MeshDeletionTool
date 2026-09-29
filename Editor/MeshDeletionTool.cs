@@ -6,7 +6,7 @@ namespace MeshDeletionTool
 {
     public class MeshDeletionToolUtils : EditorWindow
     {
-        protected Mesh GetOriginalMesh(Renderer targetRenderer)
+        protected static Mesh GetOriginalMesh(Renderer targetRenderer)
         {
             if (targetRenderer is SkinnedMeshRenderer skinnedMeshRenderer)
             {
@@ -25,7 +25,7 @@ namespace MeshDeletionTool
             return null;
         }
 
-        protected Material[] GetOriginalMaterials(Renderer targetRenderer)
+        protected static Material[] GetOriginalMaterials(Renderer targetRenderer)
         {
             if (targetRenderer is SkinnedMeshRenderer skinnedMeshRenderer)
             {
@@ -64,7 +64,7 @@ namespace MeshDeletionTool
         // 1頂点あたりのボーン数が4を超える頂点があれば警告する
         // 本ツールは4ボーン固定の Mesh.boneWeights で読み書きするため、5番目以降のウェイトは出力メッシュから失われる
         // （Mesh.GetBonesPerVertex は Unity 2019.1 以降）
-        protected void WarnIfBonesPerVertexExceedFour(Mesh mesh)
+        protected static void WarnIfBonesPerVertexExceedFour(Mesh mesh)
         {
             if (mesh == null)
                 return;

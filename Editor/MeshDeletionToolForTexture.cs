@@ -271,18 +271,10 @@ namespace MeshDeletionTool
             // 入力の検証
             if (!ValidateInputs(targetRenderer))
                 return;
-
-            // 元のメッシュとマテリアルを取得
             Mesh originalMesh = GetOriginalMesh(targetRenderer);
-            Material[] originalMaterials = GetOriginalMaterials(targetRenderer);
             if (originalMesh == null)
                 return;
-            WarnIfBonesPerVertexExceedFour(originalMesh);
-
-            // テクスチャのアルファ値とメッシュの頂点属性を一度だけ読み出す
             bool[] targetSubMeshes = GetTargetSubMeshes(originalMesh.subMeshCount);
-            AlphaMask[] subMeshMasks = CollectAlphaMasks(originalMesh.subMeshCount, originalMaterials, targetSubMeshes);
-            MeshArrays sourceArrays = MeshArraysUnityAdapter.FromMesh(originalMesh);
 
             // 要素毎の判定の実行先（自動は細分化が有効で GPU が使えるときだけ GPU。GPU が使えなければ CPU）
             string backendNote = null;
@@ -309,7 +301,7 @@ namespace MeshDeletionTool
             MeshArrays newArrays;
             try
             {
-                newArrays = pipeline.Run(sourceArrays, subMeshMasks, targetSubMeshes);
+                newArrays = Execute(targetRenderer, targetSubMeshes, pipeline);
                 if (measureTime)
                 {
                     Debug.Log("計算バックエンド: " + backend.Name + " / " + StageTimingReport.Format(pipeline.StageTimings, backend.Timings));
@@ -325,6 +317,41 @@ namespace MeshDeletionTool
             // 新しいメッシュを作成して保存
             Mesh newMesh = MeshArraysUnityAdapter.ToMesh(newArrays);
             SaveNewMesh(newMesh);
+        }
+
+        // GUI を介さない処理の入口（テスト・計測用。ウィンドウの実行ボタンも同じ処理を通る）
+        // 対象オブジェクトの Mesh と処理対象サブメッシュのテクスチャを読み出し、pipeline（設定とバックエンドを持つ）で処理した結果を返す。保存はしない
+        // targetSubMeshes[i] はサブメッシュ i を処理するかどうか（null ならテクスチャを持つ全サブメッシュ）。バックエンドの Dispose は呼び出し側が行う
+        // 処理段の時間は pipeline.StageTimings と pipeline.Backend.Timings に、出力三角形 → 元の三角形の対応は pipeline.OutputTriangleParents に残る
+        internal static MeshArrays Execute(Renderer renderer, bool[] targetSubMeshes, AlphaMeshDeletionPipeline pipeline)
+        {
+            if (renderer == null)
+                throw new ArgumentNullException(nameof(renderer));
+            Mesh originalMesh = GetOriginalMesh(renderer);
+            Material[] originalMaterials = GetOriginalMaterials(renderer);
+            if (originalMesh == null || originalMaterials == null)
+                throw new ArgumentException("対象オブジェクトに有効なメッシュがありません。", nameof(renderer));
+            WarnIfBonesPerVertexExceedFour(originalMesh);
+            if (targetSubMeshes == null)
+            {
+                targetSubMeshes = new bool[originalMesh.subMeshCount];
+                for (int subMeshIndex = 0; subMeshIndex < targetSubMeshes.Length; subMeshIndex++)
+                {
+                    Material material = subMeshIndex < originalMaterials.Length ? originalMaterials[subMeshIndex] : null;
+                    targetSubMeshes[subMeshIndex] = material != null && material.mainTexture is Texture2D;
+                }
+            }
+            else if (targetSubMeshes.Length != originalMesh.subMeshCount)
+            {
+                throw new ArgumentException("targetSubMeshes の長さがサブメッシュ数と異なります。", nameof(targetSubMeshes));
+            }
+
+            // テクスチャのアルファ値とメッシュの頂点属性を一度だけ読み出す
+            AlphaMask[] subMeshMasks = CollectAlphaMasks(originalMesh.subMeshCount, originalMaterials, targetSubMeshes);
+            MeshArrays sourceArrays = MeshArraysUnityAdapter.FromMesh(originalMesh);
+
+            // 細分化 → 削除する頂点の判定 → 切断 → 再結合
+            return pipeline.Run(sourceArrays, subMeshMasks, targetSubMeshes);
         }
 
         // 選択に従ってバックエンドを作り、選んだ理由を note に返す（1 行。CPU / GPU の明示的な選択がそのまま通ったときは null）
@@ -365,7 +392,7 @@ namespace MeshDeletionTool
         // 処理対象サブメッシュのテクスチャのアルファ値の読み出し（対象外のサブメッシュとテクスチャの無いサブメッシュは null）
         // Texture2D.GetPixel は呼び出し毎にネイティブ呼び出しになるため、GetPixels32 で一度だけ読む。同じテクスチャは一度だけ読む
         // 読み出す間だけインポート設定を読み取り可能・非圧縮に変更し（圧縮テクスチャのアルファ値は近似値になるため）、読み終えたら元に戻す
-        private AlphaMask[] CollectAlphaMasks(int subMeshCount, Material[] originalMaterials, bool[] targetSubMeshes)
+        private static AlphaMask[] CollectAlphaMasks(int subMeshCount, Material[] originalMaterials, bool[] targetSubMeshes)
         {
             Texture2D[] subMeshTextures = new Texture2D[subMeshCount];
             List<Texture2D> distinctTextures = new List<Texture2D>();

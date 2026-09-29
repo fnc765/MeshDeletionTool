@@ -231,6 +231,8 @@ namespace MeshDeletionTool
                 newMesh.SubMeshTriangles[subMeshIndex] = newSubMeshTrianglesList[subMeshIndex].ToArray();
             }
             newMesh.Bindposes = originalMesh.Bindposes;
+            // 従来は Mesh の SetVertices / SetTriangles が切断後の頂点から境界ボックスを計算していた。再結合後のメッシュもこの値を引き継ぐ
+            newMesh.Bounds = newMesh.CalculateBounds();
 
             CompletionBlendShapes(originalMesh, isRemoved, keptVertexCount, newMesh, vertexInterpolation);
 

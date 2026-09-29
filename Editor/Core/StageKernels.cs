@@ -57,6 +57,8 @@ namespace MeshDeletionTool
         public float[] OutWeights;
 
         // 定数
+        // 要素番号の始まり（GPU では 1 回のディスパッチで扱える要素数を超えるとき分割して呼ぶ。CPU では常に 0）
+        public int ItemOffset;
         public int Count;
         public int VertexCount;
         public int RefineFull;
@@ -112,7 +114,7 @@ namespace MeshDeletionTool
         // 要素 = (マスク番号, 頂点番号)。頂点が透明（アルファ値 < 閾値）なら 1
         public void ClassifyVertices(int id)
         {
-            int item = id;
+            int item = id + ItemOffset;
             if (item >= Count) return;
             int maskIndex = item / VertexCount;
             int vertex = item - maskIndex * VertexCount;
@@ -123,7 +125,7 @@ namespace MeshDeletionTool
         // 要素 = 三角形。細分化するなら 1
         public void RefineTriangleTest(int id)
         {
-            int item = id;
+            int item = id + ItemOffset;
             if (item >= Count) return;
             MaskView m = Masks[ItemMask[item]];
             int i0 = Items[item * 3 + 0];
@@ -135,7 +137,7 @@ namespace MeshDeletionTool
         // 要素 = 辺（頂点番号の昇順）。境界エッジなら OutFlags = 1 と二分探索の重み、そうでなければ 0 と 0
         public void BisectEdges(int id)
         {
-            int item = id;
+            int item = id + ItemOffset;
             if (item >= Count) return;
             MaskView m = Masks[ItemMask[item]];
             int a = Items[item * 2 + 0];

@@ -1,0 +1,362 @@
+// MeshDeletionTool の要素毎に独立な処理段（頂点の透明判定・三角形の細分化判定・辺上の境界点の二分探索）の Compute Shader 実装
+// Editor/Core/StageKernels.cs（StageKernelContext）の C# 実装と関数・行単位で対応させてあり、CPU と同じ結果（ビット単位）を返すことを意図している:
+//   - float の演算には precise を付け、融合（mad）と並べ替えを禁止して C# と同じ順序で計算する
+//   - 閾値との比較は CPU で作った 256 要素の表（_AlphaClass: 0 閾値未満 / 1 等しい / 2 より大きい）の参照だけで行い、GPU では float を比較しない
+//   - テクセル座標は従来と同じ (int)(u * (幅 - 1))、ラップは同じ整数演算
+//   - 最長辺の判定は平方根を取らず 2 乗のまま比較する（正しく丸められた sqrt では sqrt(s) < 1 ⇔ s < 1）
+//   - 多角形の面積 0 の判定は == 0、バウンディングボックスは float のまま範囲内に制限してから floor する
+// 要素は 1 次元（numthreads(64,1,1)、要素番号 = SV_DispatchThreadID.x）。C# 側は同じ番号付けで 0 〜 _Count-1 を順に実行する
+#pragma kernel ClassifyVertices
+#pragma kernel RefineTriangleTest
+#pragma kernel BisectEdges
+
+#define THREADS 64
+#define BISECTION_STEPS 10
+#define MAX_POLYGON_POINTS 6
+#define WRAP_REPEAT 0
+#define WRAP_CLAMP 1
+#define WRAP_MIRROR 2
+#define WRAP_MIRROR_ONCE 3
+
+// 全マスクのアルファ値（1 バイトずつ、4 バイト境界で連結し 4 バイトを 1 つの uint に詰めたもの。先頭のバイトが下位）
+StructuredBuffer<uint> _Alpha;
+// マスク毎に 5 要素: バイトオフセット, 幅, 高さ, ラップ U, ラップ V
+StructuredBuffer<int> _MaskInfo;
+// アルファ値（0〜255）→ 0: 閾値未満（透明）, 1: 閾値と等しい, 2: 閾値より大きい
+StructuredBuffer<uint> _AlphaClass;
+// 頂点の UV
+StructuredBuffer<float2> _UV;
+// 要素毎の頂点番号（RefineTriangleTest: 3 つずつ、BisectEdges: 昇順に 2 つずつ）
+StructuredBuffer<int> _Items;
+// 要素毎のマスク番号
+StructuredBuffer<int> _ItemMask;
+// 出力
+RWStructuredBuffer<int> _OutFlags;
+RWStructuredBuffer<float> _OutWeights;
+
+// 要素番号の始まり（1 回のディスパッチで扱える要素数を超えるとき、分割して呼ぶ）
+int _ItemOffset;
+int _Count;
+int _VertexCount;
+int _RefineFull;
+int _RefinePartial;
+int _ChordTolerance;
+int _MaxRasterSize;
+
+struct MaskView
+{
+    uint Offset;
+    int Width;
+    int Height;
+    int WrapU;
+    int WrapV;
+};
+
+MaskView LoadMask(int maskIndex)
+{
+    MaskView m;
+    m.Offset = (uint)_MaskInfo[maskIndex * 5 + 0];
+    m.Width = _MaskInfo[maskIndex * 5 + 1];
+    m.Height = _MaskInfo[maskIndex * 5 + 2];
+    m.WrapU = _MaskInfo[maskIndex * 5 + 3];
+    m.WrapV = _MaskInfo[maskIndex * 5 + 4];
+    return m;
+}
+
+// テクセルのアルファ値（4 バイトを詰めた uint から取り出す）
+uint LoadAlpha(MaskView m, int x, int y)
+{
+    uint index = m.Offset + (uint)(y * m.Width + x);
+    uint word = _Alpha[index >> 2];
+    return (word >> ((index & 3u) * 8u)) & 0xFFu;
+}
+
+// 範囲外のテクセル座標をラップモードに従って範囲内に写す（AlphaMask.Wrap と同じ結果）
+int WrapTexel(int i, int size, int mode)
+{
+    if (mode == WRAP_CLAMP)
+    {
+        return i < 0 ? 0 : size - 1;
+    }
+    if (mode == WRAP_MIRROR)
+    {
+        int period = 2 * size;
+        int m = i % period;
+        if (m < 0) m += period;
+        return m < size ? m : period - 1 - m;
+    }
+    if (mode == WRAP_MIRROR_ONCE)
+    {
+        int m = i < 0 ? -1 - i : i;
+        return m < size ? m : size - 1;
+    }
+    int r = i % size;
+    if (r < 0) r += size;
+    return r;
+}
+
+// UV座標が示すテクセル（(int)(u * (幅 - 1))、範囲外はラップ）のアルファ値の分類
+uint SampleClass(MaskView m, float2 uv)
+{
+    precise float px = uv.x * (float)(m.Width - 1);
+    precise float py = uv.y * (float)(m.Height - 1);
+    int x = (int)px;
+    int y = (int)py;
+    if (x < 0 || x >= m.Width) x = WrapTexel(x, m.Width, m.WrapU);
+    if (y < 0 || y >= m.Height) y = WrapTexel(y, m.Height, m.WrapV);
+    return _AlphaClass[LoadAlpha(m, x, y)];
+}
+
+// 片方が閾値未満で他方が閾値より大きい（AlphaSampling.IsBoundaryEdge の条件）
+bool IsBoundaryClass(uint class1, uint class2)
+{
+    return (class1 == 0u && class2 == 2u) || (class1 == 2u && class2 == 0u);
+}
+
+// Vector2.Lerp と同じ式（t を 0〜1 に制限し、a + (b - a) * t）
+float2 LerpUV(float2 a, float2 b, float t)
+{
+    t = t < 0.0f ? 0.0f : (t > 1.0f ? 1.0f : t);
+    precise float2 r;
+    r.x = a.x + (b.x - a.x) * t;
+    r.y = a.y + (b.y - a.y) * t;
+    return r;
+}
+
+// 辺上の境界点の重み（AlphaSampling.FindAlphaBoundary と同じ 10 回の二分探索）
+float BisectEdge(MaskView m, float2 uv1, float2 uv2)
+{
+    uint class1 = SampleClass(m, uv1);
+    precise float tMin = 0.0f;
+    precise float tMax = 1.0f;
+    [loop]
+    for (int i = 0; i < BISECTION_STEPS; i++)
+    {
+        precise float t = (tMin + tMax) / 2.0f;
+        float2 midUV = LerpUV(uv1, uv2, t);
+        uint midClass = SampleClass(m, midUV);
+        if (IsBoundaryClass(class1, midClass))
+        {
+            tMax = t;
+        }
+        else
+        {
+            tMin = t;
+            class1 = midClass;
+        }
+    }
+    precise float weight = (tMin + tMax) / 2.0f;
+    return weight;
+}
+
+// 0〜max に制限してから floor した整数（Mathf.Clamp(Mathf.FloorToInt(v), 0, max) と |v| < 2^31 で同じ）
+int FloorClamped(float v, int max)
+{
+    float maxF = (float)max;
+    if (v < 0.0f) v = 0.0f;
+    else if (v > maxF) v = maxF;
+    return (int)floor(v);
+}
+
+// 凸多角形（UV座標、pointCount 個）の内部にある不透明テクセルの数（stopAt に達したら打ち切る）
+int CountOpaqueTexels(MaskView m, float2 polygon[MAX_POLYGON_POINTS], int pointCount, int stopAt)
+{
+    if (pointCount < 3) return 0;
+
+    // テクセル座標系 (x = u * (w - 1), y = v * (h - 1)) に変換し、バウンディングボックスを求める
+    precise float px[MAX_POLYGON_POINTS];
+    precise float py[MAX_POLYGON_POINTS];
+    precise float minX = 3.402823466e+38f, minY = 3.402823466e+38f, maxX = -3.402823466e+38f, maxY = -3.402823466e+38f;
+    int i, j;
+    [loop]
+    for (i = 0; i < pointCount; i++)
+    {
+        px[i] = polygon[i].x * (float)(m.Width - 1);
+        py[i] = polygon[i].y * (float)(m.Height - 1);
+        minX = minX < px[i] ? minX : px[i];
+        minY = minY < py[i] ? minY : py[i];
+        maxX = maxX > px[i] ? maxX : px[i];
+        maxY = maxY > py[i] ? maxY : py[i];
+    }
+
+    // 多角形の向き（面積 0 なら内部のテクセルは無い）
+    precise float signedArea = 0.0f;
+    [loop]
+    for (i = 0; i < pointCount; i++)
+    {
+        j = (i + 1) % pointCount;
+        signedArea += px[i] * py[j] - px[j] * py[i];
+    }
+    if (signedArea == 0.0f) return 0;
+    precise float orientation = signedArea > 0.0f ? 1.0f : -1.0f;
+
+    // テクセル範囲（テクスチャの範囲内に制限する）
+    int x0 = FloorClamped(minX, m.Width - 1);
+    int x1 = FloorClamped(maxX, m.Width - 1);
+    int y0 = FloorClamped(minY, m.Height - 1);
+    int y1 = FloorClamped(maxY, m.Height - 1);
+
+    // 巨大な多角形は間引いてサンプリングする（ceil(n / MaxRasterSize) の整数演算）
+    int stride = 1;
+    if (_MaxRasterSize >= 1)
+    {
+        int extent = x1 - x0 + 1 > y1 - y0 + 1 ? x1 - x0 + 1 : y1 - y0 + 1;
+        stride = (extent + _MaxRasterSize - 1) / _MaxRasterSize;
+        if (stride < 1) stride = 1;
+    }
+
+    // 各辺の方向
+    precise float edgeDx[MAX_POLYGON_POINTS];
+    precise float edgeDy[MAX_POLYGON_POINTS];
+    [loop]
+    for (i = 0; i < pointCount; i++)
+    {
+        j = (i + 1) % pointCount;
+        edgeDx[i] = px[j] - px[i];
+        edgeDy[i] = py[j] - py[i];
+    }
+
+    int count = 0;
+    [loop]
+    for (int y = y0; y <= y1; y += stride)
+    {
+        precise float centerY = (float)y + 0.5f;
+        [loop]
+        for (int x = x0; x <= x1; x += stride)
+        {
+            // テクセルの中心が多角形の内部にあるか
+            precise float centerX = (float)x + 0.5f;
+            bool inside = true;
+            [loop]
+            for (i = 0; i < pointCount; i++)
+            {
+                precise float cross = edgeDx[i] * (centerY - py[i]) - edgeDy[i] * (centerX - px[i]);
+                if (cross * orientation < 0.0f)
+                {
+                    inside = false;
+                    break;
+                }
+            }
+            if (!inside) continue;
+            if (_AlphaClass[LoadAlpha(m, x, y)] != 0u)
+            {
+                count++;
+                if (count >= stopAt) return count;
+            }
+        }
+    }
+    return count;
+}
+
+// 三角形を細分化すべきか（AlphaBoundaryRefiner.ShouldSubdivide と同じ判定）
+bool RefineTest(MaskView m, float2 uv0, float2 uv1, float2 uv2, int i0, int i1, int i2)
+{
+    float2 uv[3] = { uv0, uv1, uv2 };
+    int index[3] = { i0, i1, i2 };
+    int i, j;
+
+    // 最長辺が 1 テクセル未満の三角形はこれ以上細分化しない（2 乗のまま比較する）
+    precise float longestSq = 0.0f;
+    [loop]
+    for (i = 0; i < 3; i++)
+    {
+        j = (i + 1) % 3;
+        precise float ex = (uv[j].x - uv[i].x) * (float)(m.Width - 1);
+        precise float ey = (uv[j].y - uv[i].y) * (float)(m.Height - 1);
+        precise float sq = ex * ex + ey * ey;
+        longestSq = longestSq > sq ? longestSq : sq;
+    }
+    if (longestSq < 1.0f) return false;
+
+    uint cls[3];
+    cls[0] = SampleClass(m, uv[0]);
+    cls[1] = SampleClass(m, uv[1]);
+    cls[2] = SampleClass(m, uv[2]);
+    int transparentCount = (cls[0] == 0u ? 1 : 0) + (cls[1] == 0u ? 1 : 0) + (cls[2] == 0u ? 1 : 0);
+
+    float2 polygon[MAX_POLYGON_POINTS];
+    polygon[0] = uv[0]; polygon[1] = uv[1]; polygon[2] = uv[2];
+    polygon[3] = uv[0]; polygon[4] = uv[0]; polygon[5] = uv[0];
+
+    // 3頂点とも透明: 内部に不透明テクセルがあれば細分化する（修正1）
+    if (transparentCount == 3)
+    {
+        if (_RefineFull == 0) return false;
+        return CountOpaqueTexels(m, polygon, 3, 1) > 0;
+    }
+    // 3頂点とも不透明: 既存処理でそのまま残るため対象外
+    if (transparentCount == 0) return false;
+    // 一部の頂点が透明: 削除される側の多角形に不透明テクセルが含まれていれば細分化する（修正2）
+    if (_RefinePartial == 0) return false;
+
+    // 削除される側の多角形（透明な頂点と、境界エッジ上の境界点を外周順に）
+    int pointCount = 0;
+    [loop]
+    for (i = 0; i < 3; i++)
+    {
+        j = (i + 1) % 3;
+        if (cls[i] == 0u)
+        {
+            polygon[pointCount] = uv[i];
+            pointCount++;
+        }
+        if (IsBoundaryClass(cls[i], cls[j]))
+        {
+            // 辺の向きは頂点番号の昇順にして切断処理と同一の境界点を得る
+            float2 uvA = index[i] < index[j] ? uv[i] : uv[j];
+            float2 uvB = index[i] < index[j] ? uv[j] : uv[i];
+            float weight = BisectEdge(m, uvA, uvB);
+            polygon[pointCount] = LerpUV(uvA, uvB, weight);
+            pointCount++;
+        }
+    }
+    return CountOpaqueTexels(m, polygon, pointCount, _ChordTolerance + 1) > _ChordTolerance;
+}
+
+// 要素 = (マスク番号, 頂点番号)。頂点が透明（アルファ値 < 閾値）なら 1
+[numthreads(THREADS, 1, 1)]
+void ClassifyVertices(uint3 id : SV_DispatchThreadID)
+{
+    int item = (int)id.x + _ItemOffset;
+    if (item >= _Count) return;
+    int maskIndex = item / _VertexCount;
+    int vertex = item - maskIndex * _VertexCount;
+    MaskView m = LoadMask(maskIndex);
+    _OutFlags[item] = SampleClass(m, _UV[vertex]) == 0u ? 1 : 0;
+}
+
+// 要素 = 三角形。細分化するなら 1
+[numthreads(THREADS, 1, 1)]
+void RefineTriangleTest(uint3 id : SV_DispatchThreadID)
+{
+    int item = (int)id.x + _ItemOffset;
+    if (item >= _Count) return;
+    MaskView m = LoadMask(_ItemMask[item]);
+    int i0 = _Items[item * 3 + 0];
+    int i1 = _Items[item * 3 + 1];
+    int i2 = _Items[item * 3 + 2];
+    _OutFlags[item] = RefineTest(m, _UV[i0], _UV[i1], _UV[i2], i0, i1, i2) ? 1 : 0;
+}
+
+// 要素 = 辺（頂点番号の昇順）。境界エッジなら _OutFlags = 1 と二分探索の重み、そうでなければ 0 と 0
+[numthreads(THREADS, 1, 1)]
+void BisectEdges(uint3 id : SV_DispatchThreadID)
+{
+    int item = (int)id.x + _ItemOffset;
+    if (item >= _Count) return;
+    MaskView m = LoadMask(_ItemMask[item]);
+    int a = _Items[item * 2 + 0];
+    int b = _Items[item * 2 + 1];
+    uint classA = SampleClass(m, _UV[a]);
+    uint classB = SampleClass(m, _UV[b]);
+    if (IsBoundaryClass(classA, classB))
+    {
+        _OutFlags[item] = 1;
+        _OutWeights[item] = BisectEdge(m, _UV[a], _UV[b]);
+    }
+    else
+    {
+        _OutFlags[item] = 0;
+        _OutWeights[item] = 0.0f;
+    }
+}

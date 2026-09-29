@@ -29,6 +29,41 @@ namespace MeshDeletionTool
         public double Milliseconds;
     }
 
+    // GUI の「計算バックエンド」の選択肢
+    public enum StageBackendMode
+    {
+        // GPU が使えれば GPU、使えなければ CPU
+        Auto = 0,
+        Cpu = 1,
+        Gpu = 2
+    }
+
+    // 処理段の時間を 1 行の文字列にする（「時間を計測」のログとベンチマークで共用）
+    public static class StageTimingReport
+    {
+        public static string Format(IEnumerable<StageTiming> stages, IEnumerable<StageTiming> kernels)
+        {
+            System.Text.StringBuilder text = new System.Text.StringBuilder();
+            double total = 0;
+            foreach (StageTiming timing in stages)
+            {
+                if (text.Length > 0) text.Append(", ");
+                text.Append(timing.Name).Append(' ').Append(timing.Milliseconds.ToString("0.0")).Append(" ms");
+                total += timing.Milliseconds;
+            }
+            text.Insert(0, "処理時間: ").Append(", 合計 ").Append(total.ToString("0.0")).Append(" ms");
+            bool first = true;
+            foreach (StageTiming timing in kernels)
+            {
+                text.Append(first ? " / カーネル: " : ", ");
+                first = false;
+                text.Append(timing.Name).Append(' ').Append(timing.Calls).Append(" 回 ").Append(timing.Elements.ToString("#,0")).Append(" 要素 ")
+                    .Append(timing.Milliseconds.ToString("0.0")).Append(" ms");
+            }
+            return text.ToString();
+        }
+    }
+
     // テクスチャのアルファ値に対する要素毎に独立な処理段（頂点の透明判定・三角形の細分化判定・辺上の境界点の二分探索）の実行先
     // CPU 実装（CpuStageBackend）と Compute Shader 実装（ComputeStageBackend）は同じ入力に対して同じ結果を返す。
     // 判定の数式は StageKernels（C#）と MeshDeletionStages.compute（HLSL）で行単位に対応させてある

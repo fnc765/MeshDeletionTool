@@ -41,6 +41,14 @@ namespace MeshDeletionTool
         // 詳細設定の折りたたみ
         private bool showAdvancedSettings = false;
 
+        // 計算バックエンド（要素毎の判定を CPU と GPU のどちらで行うか。自動は GPU が使えれば GPU）と、処理時間の計測
+        private StageBackendMode computeBackend = StageBackendMode.Auto;
+        private bool measureTime = false;
+        private static readonly string[] BackendLabels = { "自動", "CPU", "GPU" };
+
+        // テスト・計測用: null でなければ選択に関わらずこのバックエンドで処理する（呼び出し側が Dispose する）
+        internal IAlphaStageBackend backendOverride;
+
         // 1 テクセルの大きさ（mm）の表示用キャッシュ
         private Mesh texelSizeCacheMesh;
         private Vector2Int[] texelSizeCacheTextureSizes;
@@ -135,6 +143,8 @@ namespace MeshDeletionTool
                 }
             }
             GUILayout.Label("\n④処理実行", EditorStyles.boldLabel);
+            computeBackend = (StageBackendMode)EditorGUILayout.Popup("計算バックエンド", (int)computeBackend, BackendLabels);
+            measureTime = EditorGUILayout.Toggle("時間を計測", measureTime);
             // ボタンをクリックしたらメッシュ削除処理を実行
             if (GUILayout.Button("テクスチャ透明部分のメッシュを削除"))
             {
@@ -279,6 +289,14 @@ namespace MeshDeletionTool
             AlphaMask[] subMeshMasks = CollectAlphaMasks(originalMesh.subMeshCount, originalMaterials);
             MeshArrays sourceArrays = MeshArraysUnityAdapter.FromMesh(originalMesh);
 
+            // 要素毎の判定の実行先（GPU が使えなければ CPU）
+            string backendNote = null;
+            IAlphaStageBackend backend = backendOverride ?? CreateBackend(computeBackend, out backendNote);
+            if (backendOverride == null && backendNote != null)
+            {
+                if (computeBackend == StageBackendMode.Gpu) Debug.LogWarning(backendNote); else Debug.Log(backendNote);
+            }
+
             // 細分化 → 削除する頂点の判定 → 切断 → 再結合
             AlphaMeshDeletionPipeline pipeline = new AlphaMeshDeletionPipeline
             {
@@ -289,14 +307,42 @@ namespace MeshDeletionTool
                 RefineChordToleranceTexels = refineChordToleranceTexels,
                 MergeCutPolygons = mergeCutPolygons,
                 SimplifyToleranceTexels = simplifyToleranceTexels,
+                Backend = backend,
+                MeasureTime = measureTime,
                 Log = Debug.Log
             };
-            MeshArrays newArrays = pipeline.Run(sourceArrays, subMeshMasks, targetSubMeshes);
+            MeshArrays newArrays;
+            try
+            {
+                newArrays = pipeline.Run(sourceArrays, subMeshMasks, targetSubMeshes);
+                if (measureTime)
+                {
+                    Debug.Log("計算バックエンド: " + backend.Name + " / " + StageTimingReport.Format(pipeline.StageTimings, backend.Timings));
+                }
+            }
+            finally
+            {
+                if (backendOverride == null)
+                    backend.Dispose();
+            }
             lastOutputTriangleParents = pipeline.OutputTriangleParents;
 
             // 新しいメッシュを作成して保存
             Mesh newMesh = MeshArraysUnityAdapter.ToMesh(newArrays);
             SaveNewMesh(newMesh);
+        }
+
+        // 選択に従ってバックエンドを作る。GPU が使えなければ CPU にし、その理由を note に返す（1 行。使えたときは null）
+        internal static IAlphaStageBackend CreateBackend(StageBackendMode mode, out string note)
+        {
+            note = null;
+            if (mode == StageBackendMode.Cpu)
+                return new CpuStageBackend();
+            IAlphaStageBackend gpu = ComputeStageBackend.TryCreate(out string reason);
+            if (gpu != null)
+                return gpu;
+            note = (mode == StageBackendMode.Gpu ? "GPU が使えないため CPU で処理します: " : "計算バックエンド: CPU（") + reason + (mode == StageBackendMode.Gpu ? "" : "）");
+            return new CpuStageBackend();
         }
 
         // サブメッシュ毎の処理対象フラグ（チェックの無いサブメッシュは対象外）

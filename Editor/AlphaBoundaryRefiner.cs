@@ -33,6 +33,9 @@ namespace MeshDeletionTool
         // 実行結果: 各深さで細分化対象となった三角形数
         public List<int> MarkedTriangleCountPerDepth = new List<int>();
 
+        // 実行結果: サブメッシュ毎の、細分化後の三角形番号 → 元のメッシュの三角形番号（細分化が無ければ恒等）
+        public List<int[]> ParentTriangleIndexPerSubMesh = new List<int[]>();
+
         // アルファ境界付近の三角形を細分化したメッシュを返す
         // subMeshTextures[i] が null のサブメッシュは判定対象外（隣接する辺の分割にのみ追従する）
         // 細分化が不要な場合は元のメッシュをそのまま返す
@@ -40,6 +43,7 @@ namespace MeshDeletionTool
         {
             TriangleCountPerDepth.Clear();
             MarkedTriangleCountPerDepth.Clear();
+            ParentTriangleIndexPerSubMesh = CreateIdentityParents(mesh);
 
             Mesh currentMesh = mesh;
             for (int depth = 0; depth < MaxDepth; depth++)
@@ -49,11 +53,27 @@ namespace MeshDeletionTool
                 {
                     break;
                 }
-                currentMesh = SplitEdges(currentMesh, splitEdges);
+                currentMesh = SplitEdges(currentMesh, splitEdges, ParentTriangleIndexPerSubMesh, out ParentTriangleIndexPerSubMesh);
                 MarkedTriangleCountPerDepth.Add(markedCount);
                 TriangleCountPerDepth.Add(currentMesh.triangles.Length / 3);
             }
             return currentMesh;
+        }
+
+        // 各サブメッシュの三角形番号をそのまま親とする対応表を作る
+        private static List<int[]> CreateIdentityParents(Mesh mesh)
+        {
+            List<int[]> parents = new List<int[]>(mesh.subMeshCount);
+            for (int subMeshIndex = 0; subMeshIndex < mesh.subMeshCount; subMeshIndex++)
+            {
+                int[] identity = new int[mesh.GetTriangles(subMeshIndex).Length / 3];
+                for (int i = 0; i < identity.Length; i++)
+                {
+                    identity[i] = i;
+                }
+                parents.Add(identity);
+            }
+            return parents;
         }
 
         // 細分化対象の三角形を判定し、分割する辺（頂点インデックスの昇順ペア）の集合を返す
@@ -266,7 +286,8 @@ namespace MeshDeletionTool
         }
 
         // 指定した辺の中点に頂点を追加し、全ての三角形を分割された辺に合わせて再構成したメッシュを返す
-        private static Mesh SplitEdges(Mesh mesh, HashSet<(int, int)> splitEdges)
+        // parents は入力メッシュの三角形番号 → 元の三角形番号で、出力メッシュに合わせた対応表を newParents に返す
+        private static Mesh SplitEdges(Mesh mesh, HashSet<(int, int)> splitEdges, List<int[]> parents, out List<int[]> newParents)
         {
             // 頂点属性を読み出す（Unity の Mesh プロパティは呼び出し毎に配列をコピーするため一度だけ読む）
             int originalVertexCount = mesh.vertexCount;
@@ -306,15 +327,23 @@ namespace MeshDeletionTool
 
             // 各サブメッシュの三角形を、分割された辺の数に応じて再構成する（巻き順は保たれる）
             refinedMesh.subMeshCount = mesh.subMeshCount;
+            newParents = new List<int[]>(mesh.subMeshCount);
             for (int subMeshIndex = 0; subMeshIndex < mesh.subMeshCount; subMeshIndex++)
             {
                 int[] triangles = mesh.GetTriangles(subMeshIndex);
                 List<int> newTriangles = new List<int>(triangles.Length * 2);
+                List<int> newTriangleParents = new List<int>(triangles.Length);
                 for (int i = 0; i < triangles.Length; i += 3)
                 {
+                    int countBefore = newTriangles.Count / 3;
                     EmitTriangle(triangles[i], triangles[i + 1], triangles[i + 2], midpointIndexMap, vertices, newTriangles);
+                    for (int k = countBefore; k < newTriangles.Count / 3; k++)
+                    {
+                        newTriangleParents.Add(parents[subMeshIndex][i / 3]);
+                    }
                 }
                 refinedMesh.SetTriangles(newTriangles, subMeshIndex);
+                newParents.Add(newTriangleParents.ToArray());
             }
             refinedMesh.bounds = mesh.bounds;
 

@@ -27,6 +27,9 @@ namespace MeshDeletionTool
         private bool refinePartiallyCutTriangles = true;
         private int refineChordToleranceTexels = 0;
 
+        // 直前の実行結果: サブメッシュ毎の、出力メッシュの三角形番号 → 対象オブジェクトの元のメッシュの三角形番号（テスト・診断用）
+        internal List<int[]> lastOutputTriangleParents;
+
         // メニューアイテムからツールを初期化してウィンドウを表示するメソッド
         [MenuItem("Tools/MeshDeletionToolForTexture")]
         private static void Init()
@@ -143,15 +146,18 @@ namespace MeshDeletionTool
                 return;
 
             // 境界の細分化（削除処理の前に、アルファ境界付近の三角形を細分化したメッシュに置き換える）
+            List<int[]> refinedTriangleParents = null;   // 細分化後の三角形番号 → 元の三角形番号
             if (refineBoundary && refineMaxDepth > 0)
             {
-                originalMesh = RefineMeshAroundAlphaBoundary(originalMesh, originalMaterials);
+                originalMesh = RefineMeshAroundAlphaBoundary(originalMesh, originalMaterials, out refinedTriangleParents);
             }
 
             // 削除すべき頂点のインデックスを取得
             List<int> removeVerticesIndexs = GetVerticesToRemoveFromTexture(originalMesh, originalMaterials);
             // 新しいメッシュを作成
-            Mesh newMesh = CreateMeshAfterVertexModification(originalMesh, originalMaterials, removeVerticesIndexs);
+            Mesh newMesh = CreateMeshAfterVertexModification(originalMesh, originalMaterials, removeVerticesIndexs, out List<int[]> sourceTriangleIndices);
+            // 出力三角形 → 元の三角形の対応を保持する
+            lastOutputTriangleParents = ComposeTriangleParents(sourceTriangleIndices, refinedTriangleParents);
             // 新しいメッシュを保存
             SaveNewMesh(newMesh);
         }
@@ -167,8 +173,30 @@ namespace MeshDeletionTool
             return true;
         }
 
+        // 出力三角形 → 入力三角形の対応と、入力（細分化後）三角形 → 元の三角形の対応を合成する（細分化していなければそのまま）
+        private static List<int[]> ComposeTriangleParents(List<int[]> sourceTriangleIndices, List<int[]> refinedTriangleParents)
+        {
+            if (refinedTriangleParents == null)
+            {
+                return sourceTriangleIndices;
+            }
+            List<int[]> parents = new List<int[]>(sourceTriangleIndices.Count);
+            for (int subMeshIndex = 0; subMeshIndex < sourceTriangleIndices.Count; subMeshIndex++)
+            {
+                int[] sources = sourceTriangleIndices[subMeshIndex];
+                int[] composed = new int[sources.Length];
+                for (int i = 0; i < sources.Length; i++)
+                {
+                    composed[i] = refinedTriangleParents[subMeshIndex][sources[i]];
+                }
+                parents.Add(composed);
+            }
+            return parents;
+        }
+
         // アルファ境界付近の三角形を細分化したメッシュを返すメソッド（処理対象のサブメッシュのみ判定する）
-        private Mesh RefineMeshAroundAlphaBoundary(Mesh originalMesh, Material[] originalMaterials)
+        // parentTriangleIndexPerSubMesh には細分化後の三角形番号 → 元の三角形番号の対応を返す
+        private Mesh RefineMeshAroundAlphaBoundary(Mesh originalMesh, Material[] originalMaterials, out List<int[]> parentTriangleIndexPerSubMesh)
         {
             // 処理対象サブメッシュのテクスチャを集める（対象外は null）
             Texture2D[] subMeshTextures = new Texture2D[originalMesh.subMeshCount];
@@ -191,6 +219,7 @@ namespace MeshDeletionTool
                 ChordToleranceTexels = refineChordToleranceTexels
             };
             Mesh refinedMesh = refiner.Refine(originalMesh, subMeshTextures, alphaThreshold);
+            parentTriangleIndexPerSubMesh = refiner.ParentTriangleIndexPerSubMesh;
             Debug.Log("境界の細分化: 三角形 " + originalMesh.triangles.Length / 3 + " → " + refinedMesh.triangles.Length / 3 +
                       " (深さ毎の三角形数: " + string.Join(", ", refiner.TriangleCountPerDepth) + ")");
             return refinedMesh;
@@ -260,9 +289,12 @@ namespace MeshDeletionTool
         }
 
         // 頂点削除と頂点追加を行いテクスチャに合わせたメッシュ形状に編集する
-        private Mesh CreateMeshAfterVertexModification(Mesh originalMesh, Material[] originalMaterials, List<int> removeVerticesIndexs)
+        // sourceTriangleIndices にはサブメッシュ毎の、出力三角形番号 → originalMesh の三角形番号を返す
+        private Mesh CreateMeshAfterVertexModification(Mesh originalMesh, Material[] originalMaterials, List<int> removeVerticesIndexs,
+                                                       out List<int[]> sourceTriangleIndices)
         {
             MeshData newMeshData = new MeshData();
+            sourceTriangleIndices = new List<int[]>(originalMesh.subMeshCount);
 
             // 新規追加頂点の重複を避けるためにマッピング（辺の頂点インデックスの昇順ペアをキーとし、辺を共有する三角形で同じ頂点を使う）
             Dictionary<(int, int), int> edgeVertexIndexMap = new Dictionary<(int, int), int>();
@@ -314,6 +346,7 @@ namespace MeshDeletionTool
                 
                 int[] triangles = originalMesh.GetTriangles(subMeshIndex);
                 List<int> newSubMeshTriangles = new List<int>();
+                List<int> newSubMeshTriangleSources = new List<int>(triangles.Length / 3);
 
                 // 現在のサブメッシュが処理対象なら
                 if (subMeshVisibility[subMeshIndex] == true)
@@ -321,6 +354,7 @@ namespace MeshDeletionTool
                     // 各三角形を確認し、必要に応じて新しい頂点を追加
                     for (int i = 0; i < triangles.Length; i += 3)
                     {
+                        int outputCountBefore = newSubMeshTriangles.Count / 3;
                         // 三角ポリゴンを構成する頂点インデックスと削除情報を含んだタプルを作成
                         List<(int index, bool isRemoved)> triangleIndexs = new List<(int index, bool isRemoved)>
                         {
@@ -379,6 +413,12 @@ namespace MeshDeletionTool
                             // サブメッシュの三角ポリゴン配列に追加
                             newSubMeshTriangles.AddRange(polygonTriangles);
                         }
+
+                        // この三角形から生成された出力三角形の元の三角形番号を記録する
+                        for (int k = outputCountBefore; k < newSubMeshTriangles.Count / 3; k++)
+                        {
+                            newSubMeshTriangleSources.Add(i / 3);
+                        }
                     }
                 }
                 // 現在のサブメッシュが処理対象でないなら
@@ -389,7 +429,12 @@ namespace MeshDeletionTool
                     {
                         newSubMeshTriangles.Add(oldToNewIndexMap[triangles[i]]);
                     }
+                    for (int i = 0; i < triangles.Length / 3; i++)
+                    {
+                        newSubMeshTriangleSources.Add(i);
+                    }
                 }
+                sourceTriangleIndices.Add(newSubMeshTriangleSources.ToArray());
                 newMesh.SetVertices(newMeshData.Vertices.ToList());
                 newMesh.SetNormals(newMeshData.Normals.ToList());
                 newMesh.SetTangents(newMeshData.Tangents.ToList());

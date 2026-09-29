@@ -47,8 +47,11 @@ namespace MeshDeletionTool
 
         // subMeshMasks[i] はサブメッシュ i のテクスチャのアルファ値（テクスチャが無ければ null）、targetSubMeshes[i] は処理対象かどうか
         // マスクの無いサブメッシュは処理対象にできない（判定のしようがない）ため、対象になっていても対象外として扱う
+        // UV（UV0）が無いメッシュは頂点をテクセルに対応付けられないため ArgumentException を投げる（GPU では範囲外の読み出しが 0 になり黙って誤った結果になる）
         public MeshArrays Run(MeshArrays sourceMesh, AlphaMask[] subMeshMasks, bool[] targetSubMeshes)
         {
+            if (sourceMesh.UV.Length != sourceMesh.VertexCount)
+                throw new ArgumentException("メッシュに UV（UV0）が無いため、テクスチャに基づく削除はできません。", nameof(sourceMesh));
             MeshArrays originalMesh = sourceMesh;
             targetSubMeshes = ExcludeSubMeshesWithoutMask(targetSubMeshes, subMeshMasks);
             StageTimings.Clear();

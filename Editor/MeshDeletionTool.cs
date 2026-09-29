@@ -61,6 +61,22 @@ namespace MeshDeletionTool
             return removeVerticesIndexs;
         }
 
+        // メッシュが本ツールで扱える形かを確かめ、扱えなければその理由（1 行）を返す（扱えるなら null）
+        // 出力は三角形のサブメッシュとして書き出すため、全サブメッシュが三角形である必要がある（Mesh.GetTriangles は三角形以外のサブメッシュを空にしてしまう）
+        // requireUV: テクスチャに基づく処理には UV（UV0）が必要（無いと頂点をテクセルに対応付けられない）
+        protected static string FindMeshProblem(Mesh mesh, bool requireUV)
+        {
+            for (int subMeshIndex = 0; subMeshIndex < mesh.subMeshCount; subMeshIndex++)
+            {
+                MeshTopology topology = mesh.GetTopology(subMeshIndex);
+                if (topology != MeshTopology.Triangles)
+                    return "メッシュ '" + mesh.name + "' のサブメッシュ " + subMeshIndex + " は三角形ではなく " + topology + " のため処理できません。";
+            }
+            if (requireUV && !mesh.HasVertexAttribute(UnityEngine.Rendering.VertexAttribute.TexCoord0))
+                return "メッシュ '" + mesh.name + "' に UV（UV0）が無いため、テクスチャに基づく削除はできません。";
+            return null;
+        }
+
         // 1頂点あたりのボーン数が4を超える頂点があれば警告する
         // 本ツールは4ボーン固定の Mesh.boneWeights で読み書きするため、5番目以降のウェイトは出力メッシュから失われる
         // （Mesh.GetBonesPerVertex は Unity 2019.1 以降）

@@ -39,6 +39,12 @@ namespace MeshDeletionTool
             Mesh originalMesh = GetOriginalMesh(targetRenderer);
             if (originalMesh == null)
                 return;
+            string meshProblem = FindMeshProblem(originalMesh, false);
+            if (meshProblem != null)
+            {
+                Debug.LogError(meshProblem);
+                return;
+            }
 
             WarnIfBonesPerVertexExceedFour(originalMesh);
             List<int> removeVerticesIndexs = GetVerticesToRemove(targetRenderer, originalMesh, deletionBounds);

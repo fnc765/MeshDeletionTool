@@ -307,6 +307,12 @@ namespace MeshDeletionTool
                     Debug.Log("計算バックエンド: " + backend.Name + " / " + StageTimingReport.Format(pipeline.StageTimings, backend.Timings));
                 }
             }
+            catch (ArgumentException e)
+            {
+                // 入力が処理できない形（三角形でないサブメッシュ、UV 無し）のときは 1 行のエラーで中止する
+                Debug.LogError(e.Message);
+                return;
+            }
             finally
             {
                 if (backendOverride == null)
@@ -323,6 +329,7 @@ namespace MeshDeletionTool
         // 対象オブジェクトの Mesh と処理対象サブメッシュのテクスチャを読み出し、pipeline（設定とバックエンドを持つ）で処理した結果を返す。保存はしない
         // targetSubMeshes[i] はサブメッシュ i を処理するかどうか（null ならテクスチャを持つ全サブメッシュ）。バックエンドの Dispose は呼び出し側が行う
         // 処理段の時間は pipeline.StageTimings と pipeline.Backend.Timings に、出力三角形 → 元の三角形の対応は pipeline.OutputTriangleParents に残る
+        // メッシュが処理できない形（三角形でないサブメッシュ、UV 無し）なら、テクスチャを読む前に ArgumentException を投げる
         internal static MeshArrays Execute(Renderer renderer, bool[] targetSubMeshes, AlphaMeshDeletionPipeline pipeline)
         {
             if (renderer == null)
@@ -331,6 +338,9 @@ namespace MeshDeletionTool
             Material[] originalMaterials = GetOriginalMaterials(renderer);
             if (originalMesh == null || originalMaterials == null)
                 throw new ArgumentException("対象オブジェクトに有効なメッシュがありません。", nameof(renderer));
+            string meshProblem = FindMeshProblem(originalMesh, true);
+            if (meshProblem != null)
+                throw new ArgumentException(meshProblem, nameof(renderer));
             WarnIfBonesPerVertexExceedFour(originalMesh);
             if (targetSubMeshes == null)
             {

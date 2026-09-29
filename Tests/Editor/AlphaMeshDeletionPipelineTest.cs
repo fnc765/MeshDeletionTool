@@ -100,4 +100,17 @@ public class AlphaMeshDeletionPipelineTest
         Assert.AreEqual(mesh.VertexCount, withoutMask.VertexCount);
         Assert.AreEqual(new[] { true, true }, targets);   // 呼び出し側の配列は変えない
     }
+
+    // UV の無いメッシュは判定できないので例外にする（GPU で黙って誤った結果になるのを防ぐ）
+    [Test]
+    public void Run_MeshWithoutUV_Throws()
+    {
+        MeshArrays mesh = MeshCoreTestUtils.Grid(2);
+        mesh.UV = new Vector2[0];
+        AlphaMask mask = MeshCoreTestUtils.LeftTransparent(8, 8);
+        foreach (bool refine in new[] { false, true })
+        {
+            Assert.Throws<System.ArgumentException>(() => Pipeline(new List<string>(), refine).Run(mesh, new[] { mask, mask }, new[] { true, true }));
+        }
+    }
 }

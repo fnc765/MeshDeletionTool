@@ -82,6 +82,9 @@ namespace MeshDeletionTool
             Material[] originalMaterials = GetOriginalMaterials(targetRenderer);
             if (originalMesh == null || originalMaterials == null)
                 return "対象オブジェクトに有効なメッシュがありません。";
+            string meshProblem = FindMeshProblem(originalMesh, true);
+            if (meshProblem != null)
+                return meshProblem;
 
             StringBuilder text = new StringBuilder();
             text.AppendLine("MeshDeletionTool ベンチマーク  " + DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"));

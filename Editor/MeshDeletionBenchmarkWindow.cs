@@ -19,6 +19,8 @@ namespace MeshDeletionTool
         private float boundaryPrecisionTexels = 1.0f;
         private int refineMaxDepth = 3;
         private bool mergeCutPolygons = true;
+        // 診断: 結果不一致のとき、最初に異なる頂点の由来（親の辺・重み）と二分探索の途中経過を CPU / GPU で並べて出す（頂点の由来の記録の分だけ少し遅くなる）
+        private bool diagnose = false;
         private Vector2 scroll;
         private string report = "";
 
@@ -51,6 +53,7 @@ namespace MeshDeletionTool
             refineMaxDepth = EditorGUILayout.IntSlider("細分化の最大深さ", refineMaxDepth, 0, 5);
             mergeCutPolygons = EditorGUILayout.Toggle("切断後の再結合", mergeCutPolygons);
             EditorGUI.EndDisabledGroup();
+            diagnose = EditorGUILayout.Toggle(new GUIContent("診断", "結果不一致のとき、最初に異なる頂点の由来と二分探索の途中経過を CPU / GPU で並べて出す"), diagnose);
 
             if (GUILayout.Button("ベンチマーク実行（CPU と GPU）"))
             {
@@ -72,6 +75,10 @@ namespace MeshDeletionTool
             public Dictionary<string, (int Calls, long Elements)> KernelCounts = new Dictionary<string, (int, long)>();
             public List<double> Totals = new List<double>();
             public MeshArrays Output;
+            // 診断用（診断が有効なときの最後の実行の記録）
+            public VertexOrigin[] Origins;
+            public MeshArrays RefinedMesh;
+            public List<(int A, int B)> MidpointEdges;
         }
 
         // 計測して報告の文字列を返す。途中で例外が出ても報告に残す（バッファは Measure の finally で解放される。テクスチャの読み出しはインポート設定を変更しない）
@@ -126,7 +133,7 @@ namespace MeshDeletionTool
             if (readNote != null)
                 text.AppendLine("  " + readNote);
             text.AppendLine("設定: 閾値 " + alphaThreshold + ", 細分化 " + (refineBoundary ? "あり（精度 " + boundaryPrecisionTexels + " テクセル, 深さ " + refineMaxDepth + ", 再結合 " + (mergeCutPolygons ? "あり" : "なし") + "）" : "なし") +
-                            ", 計測 " + iterations + " 回（最初の 1 回は捨てる）");
+                            ", 計測 " + iterations + " 回（最初の 1 回は捨てる）" + (diagnose ? ", 診断あり" : ""));
             if (targetSubMeshes.Count(t => t) == 0)
             {
                 text.AppendLine("テクスチャを持つサブメッシュが無いため計測できません。");
@@ -169,6 +176,13 @@ namespace MeshDeletionTool
                 text.AppendLine(difference == null
                     ? "結果一致: ✓ CPU と GPU の出力（頂点座標・UV・三角形・法線・接線・ブレンドシェイプ）はビット単位で同じです。"
                     : "結果不一致: ✗ " + difference);
+                if (difference != null)
+                {
+                    if (!diagnose)
+                        text.AppendLine("「診断」を有効にして再実行すると、最初に異なる頂点の由来と二分探索の途中経過（CPU / GPU）が表示されます。");
+                    else
+                        text.Append(Diagnose(results[0], results[1], subMeshMasks, sourceArrays.VertexCount));
+                }
             }
             text.AppendLine("出力: " + results[0].Output.VertexCount.ToString("#,0") + " 頂点 / " + results[0].Output.TriangleCount.ToString("#,0") + " 三角形");
 
@@ -179,6 +193,25 @@ namespace MeshDeletionTool
             foreach ((string label, string before, string after) in PhaseABaseline)
             {
                 text.AppendLine("| " + label + " | " + before + " | " + after + " |");
+            }
+        }
+
+        // 結果不一致のときの診断文（座標の差でなければ由来の診断はできない）
+        private string Diagnose(BackendResult cpu, BackendResult gpu, AlphaMask[] subMeshMasks, int sourceVertexCount)
+        {
+            int vertex = MeshArraysComparer.FirstDifferentVertex(cpu.Output, gpu.Output);
+            if (vertex < 0)
+                return "診断: 頂点座標の差ではない（UV・三角形・法線などの差）ため、二分探索の診断は行いません。" + Environment.NewLine;
+            BisectionDiagnostics.RunInfo cpuInfo = new BisectionDiagnostics.RunInfo { Label = "CPU", Output = cpu.Output, Origins = cpu.Origins, RefinedMesh = cpu.RefinedMesh, MidpointEdges = cpu.MidpointEdges, SourceVertexCount = sourceVertexCount };
+            BisectionDiagnostics.RunInfo gpuInfo = new BisectionDiagnostics.RunInfo { Label = "GPU", Output = gpu.Output, Origins = gpu.Origins, RefinedMesh = gpu.RefinedMesh, MidpointEdges = gpu.MidpointEdges, SourceVertexCount = sourceVertexCount };
+            try
+            {
+                return BisectionDiagnostics.Describe(vertex, cpuInfo, gpuInfo, subMeshMasks, alphaThreshold);
+            }
+            catch (Exception e)
+            {
+                Debug.LogException(e);
+                return "診断中に例外が発生しました: " + e + Environment.NewLine;
             }
         }
 
@@ -201,11 +234,15 @@ namespace MeshDeletionTool
                         MergeCutPolygons = mergeCutPolygons,
                         SimplifyToleranceTexels = boundaryPrecisionTexels,
                         Backend = backend,
-                        MeasureTime = true
+                        MeasureTime = true,
+                        RecordVertexOrigins = diagnose
                     };
                     Stopwatch stopwatch = Stopwatch.StartNew();
                     result.Output = pipeline.Run(sourceArrays, subMeshMasks, targetSubMeshes);
                     double total = stopwatch.Elapsed.TotalMilliseconds;
+                    result.Origins = pipeline.OutputVertexOrigins;
+                    result.RefinedMesh = pipeline.RefinedMesh;
+                    result.MidpointEdges = pipeline.RefinedMidpointEdges;
                     if (i == 0)
                         continue;   // ウォームアップ（JIT、シェーダーの読み込み、バッファの確保）
                     result.Totals.Add(total);

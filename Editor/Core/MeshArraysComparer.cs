@@ -57,6 +57,19 @@ namespace MeshDeletionTool
             return null;
         }
 
+        // 座標が異なる最初の頂点番号（頂点数が同じで座標に差が無ければ -1。診断用）
+        public static int FirstDifferentVertex(MeshArrays a, MeshArrays b)
+        {
+            if (a.VertexCount != b.VertexCount)
+                return -1;
+            for (int i = 0; i < a.VertexCount; i++)
+            {
+                if (!Same(a.Vertices[i], b.Vertices[i]))
+                    return i;
+            }
+            return -1;
+        }
+
         private static string CompareUV(MeshArrays a, MeshArrays b)
         {
             for (int channel = 0; channel < MeshArrays.UVChannelCount; channel++)

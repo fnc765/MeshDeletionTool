@@ -6,7 +6,7 @@ namespace MeshDeletionTool
 {
     // 処理段を CPU で実行するバックエンド。カーネルの C# 実装（StageKernelContext）を要素毎に順に呼ぶ
     // GPU が使えないとき（Compute Shader 非対応、シェーダーが見つからない、テスト・ハーネス）の既定の実行先で、GPU と同じ結果を返す
-    public class CpuStageBackend : IAlphaStageBackend
+    public class CpuStageBackend : IAlphaStageBackend, IBisectionTracer
     {
         public string Name => "CPU";
 
@@ -87,6 +87,20 @@ namespace MeshDeletionTool
             Record("BisectEdges", context.Count, stopwatch);
             isBoundary = StageBatch.SplitFlags(context.OutFlags, edgeSets, 2, setOffsets);
             weights = StageBatch.SplitWeights(context.OutWeights, edgeSets, 2, setOffsets);
+        }
+
+        // 診断用: 1 本の辺の二分探索の途中経過（StageKernelContext.BisectEdgeTrace）
+        public uint[] TraceBisection(Vector2 uvA, Vector2 uvB, AlphaMask mask, float alphaThreshold, out string reason)
+        {
+            reason = null;
+            StageKernelContext context = new StageKernelContext
+            {
+                Masks = new[] { MaskView.From(mask) },
+                AlphaClass = StageKernelContext.BuildAlphaClassTable(alphaThreshold)
+            };
+            uint[] trace = new uint[BisectionTrace.Words];
+            context.BisectEdgeTrace(context.Masks[0], uvA, uvB, trace);
+            return trace;
         }
 
         public void ResetTimings()

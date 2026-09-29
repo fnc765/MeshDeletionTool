@@ -50,6 +50,13 @@ namespace MeshDeletionTool
         // 実行結果: サブメッシュ毎の、出力メッシュの三角形番号 → 元のメッシュの三角形番号（テスト・診断用）
         public List<int[]> OutputTriangleParents;
 
+        // 診断用: 出力メッシュの頂点毎の由来（元の頂点 / 細分化の中点 / 切断の境界点と、その親の辺・重み）を OutputVertexOrigins に記録する
+        // 有効にすると、切断の入力（細分化後）メッシュを RefinedMesh に、中点の親の辺を RefinedMidpointEdges に残す。結果は変わらない
+        public bool RecordVertexOrigins;
+        public VertexOrigin[] OutputVertexOrigins;
+        public MeshArrays RefinedMesh;
+        public List<(int A, int B)> RefinedMidpointEdges;
+
         // subMeshMasks[i] はサブメッシュ i のテクスチャのアルファ値（テクスチャが無ければ null）、targetSubMeshes[i] は処理対象かどうか
         // マスクの無いサブメッシュは処理対象にできない（判定のしようがない）ため、対象になっていても対象外として扱う
         // UV（UV0）が無いメッシュは頂点をテクセルに対応付けられないため ArgumentException を投げる（GPU では範囲外の読み出しが 0 になり黙って誤った結果になる）
@@ -64,11 +71,15 @@ namespace MeshDeletionTool
 
             // 境界の細分化（削除処理の前に、アルファ境界付近の三角形を細分化したメッシュに置き換える）
             List<int[]> refinedTriangleParents = null;   // 細分化後の三角形番号 → 元の三角形番号
+            List<(int A, int B)> midpointEdges = null;
             if (RefineBoundary && RefineMaxDepth > 0)
             {
-                originalMesh = RefineMeshAroundAlphaBoundary(originalMesh, subMeshMasks, targetSubMeshes, out refinedTriangleParents);
+                originalMesh = RefineMeshAroundAlphaBoundary(originalMesh, subMeshMasks, targetSubMeshes, out refinedTriangleParents, out midpointEdges);
                 RecordStage("細分化", stopwatch);
             }
+            OutputVertexOrigins = null;
+            RefinedMesh = RecordVertexOrigins ? originalMesh : null;
+            RefinedMidpointEdges = RecordVertexOrigins ? (midpointEdges ?? new List<(int A, int B)>()) : null;
 
             AlphaMeshCutter cutter = new AlphaMeshCutter { AlphaThreshold = AlphaThreshold, Backend = Backend };
             // 削除すべき頂点のインデックスを取得
@@ -78,6 +89,8 @@ namespace MeshDeletionTool
             MeshArrays newMesh = cutter.Cut(originalMesh, subMeshMasks, targetSubMeshes, removeVerticesIndexs, out List<int[]> sourceTriangleIndices);
             // 出力三角形 → 元の三角形の対応を保持する
             OutputTriangleParents = ComposeTriangleParents(sourceTriangleIndices, refinedTriangleParents);
+            if (RecordVertexOrigins)
+                OutputVertexOrigins = BuildCutVertexOrigins(cutter, sourceMesh.VertexCount, RefinedMidpointEdges, newMesh.VertexCount);
             RecordStage("切断", stopwatch);
 
             // 切断後の再結合（細分化で増えた三角形を元の三角形ごとに結合し直す）
@@ -116,10 +129,39 @@ namespace MeshDeletionTool
             stopwatch.Restart();
         }
 
+        // 切断後メッシュの頂点毎の由来（先頭は細分化後メッシュの残した頂点が番号の昇順、続いて境界点が追加順）
+        private static VertexOrigin[] BuildCutVertexOrigins(AlphaMeshCutter cutter, int sourceVertexCount, List<(int A, int B)> midpointEdges, int cutVertexCount)
+        {
+            VertexOrigin[] origins = new VertexOrigin[cutVertexCount];
+            int cutIndex = 0;
+            for (int refinedIndex = 0; refinedIndex < cutter.LastIsRemoved.Length && cutIndex < cutter.LastKeptVertexCount; refinedIndex++)
+            {
+                if (cutter.LastIsRemoved[refinedIndex])
+                    continue;
+                origins[cutIndex++] = DescribeRefinedVertex(refinedIndex, sourceVertexCount, midpointEdges);
+            }
+            foreach (KeyValuePair<int, (int, int, float)> pair in cutter.LastVertexInterpolation)
+            {
+                (int a, int b, float weight) = pair.Value;
+                cutter.LastBoundaryVertexSubMesh.TryGetValue(pair.Key, out int subMesh);
+                origins[pair.Key] = new VertexOrigin { Kind = VertexOriginKind.Boundary, Source = -1, ParentA = a, ParentB = b, Weight = weight, SubMesh = subMesh };
+            }
+            return origins;
+        }
+
+        // 細分化後メッシュの頂点の由来（元の頂点か、中点か）
+        public static VertexOrigin DescribeRefinedVertex(int refinedIndex, int sourceVertexCount, List<(int A, int B)> midpointEdges)
+        {
+            if (refinedIndex < sourceVertexCount)
+                return new VertexOrigin { Kind = VertexOriginKind.Original, Source = refinedIndex, ParentA = -1, ParentB = -1, Weight = 0f, SubMesh = -1 };
+            (int a, int b) = midpointEdges[refinedIndex - sourceVertexCount];
+            return new VertexOrigin { Kind = VertexOriginKind.Midpoint, Source = refinedIndex, ParentA = a, ParentB = b, Weight = 0.5f, SubMesh = -1 };
+        }
+
         // アルファ境界付近の三角形を細分化したメッシュを返すメソッド（処理対象のサブメッシュのみ判定する）
-        // parentTriangleIndexPerSubMesh には細分化後の三角形番号 → 元の三角形番号の対応を返す
+        // parentTriangleIndexPerSubMesh には細分化後の三角形番号 → 元の三角形番号の対応を、midpointEdges には中点頂点の親の辺を返す
         private MeshArrays RefineMeshAroundAlphaBoundary(MeshArrays originalMesh, AlphaMask[] subMeshMasks, bool[] targetSubMeshes,
-                                                         out List<int[]> parentTriangleIndexPerSubMesh)
+                                                         out List<int[]> parentTriangleIndexPerSubMesh, out List<(int A, int B)> midpointEdges)
         {
             // 処理対象サブメッシュのテクスチャを集める（対象外は null）
             AlphaMask[] targetMasks = new AlphaMask[originalMesh.SubMeshCount];
@@ -140,6 +182,7 @@ namespace MeshDeletionTool
             };
             MeshArrays refinedMesh = refiner.Refine(originalMesh, targetMasks, AlphaThreshold);
             parentTriangleIndexPerSubMesh = refiner.ParentTriangleIndexPerSubMesh;
+            midpointEdges = refiner.MidpointEdges;
             Log?.Invoke("境界の細分化: 三角形 " + originalMesh.TriangleCount + " → " + refinedMesh.TriangleCount +
                         " (深さ毎の三角形数: " + string.Join(", ", refiner.TriangleCountPerDepth) + ")");
             return refinedMesh;
@@ -160,6 +203,15 @@ namespace MeshDeletionTool
             CutPolygonMerger merger = new CutPolygonMerger { SimplifyToleranceTexels = SimplifyToleranceTexels };
             MeshArrays mergedMesh = merger.Merge(cutMesh, OutputTriangleParents, sourceMesh, keptOriginalVertexCount, textureSizes);
             OutputTriangleParents = merger.ParentTriangleIndexPerSubMesh;
+            if (OutputVertexOrigins != null)
+            {
+                VertexOrigin[] mergedOrigins = new VertexOrigin[merger.VertexSourceIndex.Length];
+                for (int i = 0; i < mergedOrigins.Length; i++)
+                {
+                    mergedOrigins[i] = OutputVertexOrigins[merger.VertexSourceIndex[i]];
+                }
+                OutputVertexOrigins = mergedOrigins;
+            }
             Log?.Invoke("切断後の再結合: 三角形 " + merger.TriangleCountBefore + " → " + merger.TriangleCountAfter +
                         ", 頂点 " + merger.VertexCountBefore + " → " + merger.VertexCountAfter +
                         " (一直線上の頂点の削除 " + merger.RemovedFlatVertexCount + ", 切り口の間引き " + merger.RemovedChainVertexCount +

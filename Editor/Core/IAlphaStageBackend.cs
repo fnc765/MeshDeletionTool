@@ -64,6 +64,13 @@ namespace MeshDeletionTool
         }
     }
 
+    // 診断用: 1 本の辺の二分探索を途中経過付きで実行できるバックエンド（CPU / GPU）。ベンチマークの「診断」が結果不一致のときに使う
+    public interface IBisectionTracer
+    {
+        // uvA → uvB の辺（切断処理と同じく頂点番号の昇順の向き）の二分探索を行い、BisectionTrace.Words 語の記録を返す。使えなければ null と理由
+        uint[] TraceBisection(Vector2 uvA, Vector2 uvB, AlphaMask mask, float alphaThreshold, out string reason);
+    }
+
     // テクスチャのアルファ値に対する要素毎に独立な処理段（頂点の透明判定・三角形の細分化判定・辺上の境界点の二分探索）の実行先
     // CPU 実装（CpuStageBackend）と Compute Shader 実装（ComputeStageBackend）は同じ入力に対して同じ結果を返す。
     // 判定の数式は StageKernels（C#）と MeshDeletionStages.compute（HLSL）で行単位に対応させてある

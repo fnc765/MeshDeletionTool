@@ -18,7 +18,7 @@
 //   3. 比較（<, ==）の左辺も precise の変数にしてから比べる（cross * orientation < 0 を符号判定に置き換えられないようにする）
 //   4. lerp / mad / dot / length / saturate などの組み込み関数は使わない。x / 2.0f はそのまま書く（2 の冪の除算は正確なので * 0.5f への置き換えは結果を変えない）
 //   5. 整数演算・比較・表の参照・ftoi（(int) キャスト、0 方向への切り捨て）・floor はどの実装でも同じ結果なので対象外
-//   6. C#（StageKernels.cs）も同じ文の分け方で書く（Mono は float32 演算を単精度で行うので、C# 側の文の分け方は結果を変えない）
+//   6. C#（StageKernels.cs）は同じ演算を同じ順序・同じ型で書くが、文は分けない（Mono は float の各演算を単精度に丸めて融合しないので結果は同じで、分けない方が速い）
 //   検証: glslang（HLSL フロントエンド）で SPIR-V にすると、全ての float 演算に NoContraction が付く（perf/phaseC の validate_hlsl.sh）。FXC（D3D11）は PC で確認する
 #pragma kernel ClassifyVertices
 #pragma kernel RefineTriangleTest

@@ -29,8 +29,9 @@ namespace MeshDeletionTool
     // 処理段のカーネル（頂点の透明判定・三角形の細分化判定・辺上の境界点の二分探索）の C# 実装
     // Editor/Shaders/MeshDeletionStages.compute の HLSL と関数・行単位で対応させてあり、CPU バックエンドはこのクラスをそのまま実行する。
     // GPU と同じ結果（ビット単位）を得るための規則:
-    //   - float の演算は HLSL と同じ順序で、1 つずつ別の文に書く（HLSL 側では各文の代入先に precise を付けて融合（mad）と並べ替えを禁止する。
-    //     .compute 先頭の「precise の規則」参照。Mono は float32 演算を単精度で行うので、C# 側の文の分け方は結果を変えない）
+    //   - float の演算は HLSL と同じ順序・同じ型で書く。HLSL 側は 1 演算ずつ別の文にして precise を付け、融合（mad）と並べ替えを禁止する
+    //     （.compute 先頭の「precise の規則」参照）。C# 側は式のまま書いてよい: Mono（x64、SSE）は float の各演算を単精度に丸め、融合はしないので
+    //     文の分け方で結果は変わらず、分けない方が速い（分けた版は Unity 上で約 3 倍遅かった）
     //   - 閾値との比較は AlphaClass 表（アルファ値 → 閾値未満 / 等しい / より大きい）の参照だけで行い、float の比較を GPU に持ち込まない
     //   - テクセル座標は従来と同じ (int)(u * (幅 - 1))、ラップは同じ整数演算
     //   - 最長辺の判定は平方根を取らず 2 乗のまま比較する（正しく丸められた sqrt では sqrt(s) < 1 ⇔ s < 1）
@@ -192,12 +193,8 @@ namespace MeshDeletionTool
         // UV座標が示すテクセル（(int)(u * (幅 - 1))、範囲外はラップ）のアルファ値の分類
         private byte SampleClass(MaskView m, Vector2 uv)
         {
-            float u = uv.x;
-            float v = uv.y;
-            float w = (float)(m.Width - 1);
-            float h = (float)(m.Height - 1);
-            float px = u * w;
-            float py = v * h;
+            float px = uv.x * (float)(m.Width - 1);
+            float py = uv.y * (float)(m.Height - 1);
             int x = (int)px;
             int y = (int)py;
             if (x < 0 || x >= m.Width) x = WrapTexel(x, m.Width, m.WrapU);
@@ -211,23 +208,13 @@ namespace MeshDeletionTool
             return (class1 == 0 && class2 == 2) || (class1 == 2 && class2 == 0);
         }
 
-        // Vector2.Lerp と同じ式（t を 0〜1 に制限し、a + (b - a) * t）。減算・乗算・加算を別の文にする（HLSL と同じ）
+        // Vector2.Lerp と同じ式（t を 0〜1 に制限し、a + (b - a) * t）
         private static Vector2 LerpUV(Vector2 a, Vector2 b, float t)
         {
-            float tc = t < 0f ? 0f : (t > 1f ? 1f : t);
-            float ax = a.x;
-            float ay = a.y;
-            float bx = b.x;
-            float by = b.y;
-            float dx = bx - ax;
-            float dy = by - ay;
-            float mx = dx * tc;
-            float my = dy * tc;
-            float rx = ax + mx;
-            float ry = ay + my;
+            t = t < 0f ? 0f : (t > 1f ? 1f : t);
             Vector2 r;
-            r.x = rx;
-            r.y = ry;
+            r.x = a.x + (b.x - a.x) * t;
+            r.y = a.y + (b.y - a.y) * t;
             return r;
         }
 
@@ -239,8 +226,7 @@ namespace MeshDeletionTool
             float tMax = 1f;
             for (int i = 0; i < BisectionSteps; i++)
             {
-                float sum = tMin + tMax;
-                float t = sum / 2f;
+                float t = (tMin + tMax) / 2f;
                 Vector2 midUV = LerpUV(uv1, uv2, t);
                 byte midClass = SampleClass(m, midUV);
                 if (IsBoundaryClass(class1, midClass))
@@ -253,9 +239,7 @@ namespace MeshDeletionTool
                     class1 = midClass;
                 }
             }
-            float finalSum = tMin + tMax;
-            float weight = finalSum / 2f;
-            return weight;
+            return (tMin + tMax) / 2f;
         }
 
         // 診断用: BisectEdge と同じ二分探索を行いながら、各段の t・中点 UV・px, py・テクセル座標・分類を trace（BisectionTrace の並び）に記録する
@@ -335,15 +319,11 @@ namespace MeshDeletionTool
             if (pointCount < 3) return 0;
 
             // テクセル座標系 (x = u * (w - 1), y = v * (h - 1)) に変換し、バウンディングボックスを求める
-            float w = (float)(m.Width - 1);
-            float h = (float)(m.Height - 1);
             float minX = float.MaxValue, minY = float.MaxValue, maxX = float.MinValue, maxY = float.MinValue;
             for (int i = 0; i < pointCount; i++)
             {
-                float pu = polygon[i].x;
-                float pv = polygon[i].y;
-                px[i] = pu * w;
-                py[i] = pv * h;
+                px[i] = polygon[i].x * (float)(m.Width - 1);
+                py[i] = polygon[i].y * (float)(m.Height - 1);
                 minX = minX < px[i] ? minX : px[i];
                 minY = minY < py[i] ? minY : py[i];
                 maxX = maxX > px[i] ? maxX : px[i];
@@ -355,14 +335,7 @@ namespace MeshDeletionTool
             for (int i = 0; i < pointCount; i++)
             {
                 int j = (i + 1) % pointCount;
-                float pxi = px[i];
-                float pyi = py[i];
-                float pxj = px[j];
-                float pyj = py[j];
-                float a1 = pxi * pyj;
-                float a2 = pxj * pyi;
-                float d = a1 - a2;
-                signedArea = signedArea + d;
+                signedArea += px[i] * py[j] - px[j] * py[i];
             }
             if (signedArea == 0f) return 0;
             float orientation = signedArea > 0f ? 1f : -1f;
@@ -386,39 +359,24 @@ namespace MeshDeletionTool
             for (int i = 0; i < pointCount; i++)
             {
                 int j = (i + 1) % pointCount;
-                float pxi = px[i];
-                float pyi = py[i];
-                float pxj = px[j];
-                float pyj = py[j];
-                edgeDx[i] = pxj - pxi;
-                edgeDy[i] = pyj - pyi;
+                edgeDx[i] = px[j] - px[i];
+                edgeDy[i] = py[j] - py[i];
             }
 
             int count = 0;
             for (int y = y0; y <= y1; y += stride)
             {
-                float yf = (float)y;
-                float centerY = yf + 0.5f;
+                float centerY = (float)y + 0.5f;
                 for (int x = x0; x <= x1; x += stride)
                 {
                     // テクセルの中心が多角形の内部にあるか
-                    float xf = (float)x;
-                    float centerX = xf + 0.5f;
+                    float centerX = (float)x + 0.5f;
                     RasterTexelTests++;
                     bool inside = true;
                     for (int i = 0; i < pointCount; i++)
                     {
-                        float pxi = px[i];
-                        float pyi = py[i];
-                        float ex = edgeDx[i];
-                        float ey = edgeDy[i];
-                        float dyc = centerY - pyi;
-                        float dxc = centerX - pxi;
-                        float c1 = ex * dyc;
-                        float c2 = ey * dxc;
-                        float cross = c1 - c2;
-                        float side = cross * orientation;
-                        if (side < 0f)
+                        float cross = edgeDx[i] * (centerY - py[i]) - edgeDy[i] * (centerX - px[i]);
+                        if (cross * orientation < 0f)
                         {
                             inside = false;
                             break;
@@ -452,23 +410,13 @@ namespace MeshDeletionTool
             index[0] = i0; index[1] = i1; index[2] = i2;
 
             // 最長辺が 1 テクセル未満の三角形はこれ以上細分化しない（2 乗のまま比較する）
-            float w = (float)(m.Width - 1);
-            float h = (float)(m.Height - 1);
             float longestSq = 0f;
             for (int i = 0; i < 3; i++)
             {
                 int j = (i + 1) % 3;
-                float uix = uv[i].x;
-                float uiy = uv[i].y;
-                float ujx = uv[j].x;
-                float ujy = uv[j].y;
-                float dux = ujx - uix;
-                float duy = ujy - uiy;
-                float ex = dux * w;
-                float ey = duy * h;
-                float exx = ex * ex;
-                float eyy = ey * ey;
-                float sq = exx + eyy;
+                float ex = (uv[j].x - uv[i].x) * (float)(m.Width - 1);
+                float ey = (uv[j].y - uv[i].y) * (float)(m.Height - 1);
+                float sq = ex * ex + ey * ey;
                 longestSq = longestSq > sq ? longestSq : sq;
             }
             if (longestSq < 1f) return false;

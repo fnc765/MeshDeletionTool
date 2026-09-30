@@ -4,7 +4,8 @@ using UnityEngine;
 
 namespace MeshDeletionTool
 {
-    // MeshDeletionForTexture コンポーネントのインスペクター（設定項目の名前と意味はウィンドウ版と同じ）と、ヒエラルキーの右クリックメニュー
+    // MeshDeletionForTexture コンポーネントのインスペクター（設定項目の表示は MeshDeletionSettingsGUI でウィンドウ版と共通）と、ヒエラルキーの右クリックメニュー
+    // 上から (1) 状態（誰が置き換えるか）と説明、(2) プレビューとポリゴン数の変化、(3) 基本設定、(4) 処理対象のサブメッシュ、(5) 詳細設定
     [CustomEditor(typeof(MeshDeletionForTexture))]
     internal class MeshDeletionForTextureEditor : Editor
     {
@@ -15,7 +16,10 @@ namespace MeshDeletionTool
         private SerializedProperty mergeAfterCut;
         private SerializedProperty subMeshEnabled;
         private bool showAdvancedSettings;
+        private bool showExplanation;
         private bool showSubMeshStats;
+        // 切り抜きの精度で「カスタム」を選んでいる（プリセットと同じ値でもスライダーを出したままにする）
+        private bool customPrecision;
         private readonly TexelSizeEstimator texelSizeEstimator = new TexelSizeEstimator();
 
         private void OnEnable()
@@ -72,78 +76,210 @@ namespace MeshDeletionTool
                 else if (MeshDeletionRunner.FindMeshProblem(mesh, true) is string problem)
                     EditorGUILayout.HelpBox(problem, MessageType.Error);
             }
-            DrawPlayModeNote(component);
+
+            // (1) 状態（誰がいつ置き換えるか）と説明
+            DrawStatus(component);
+
+            // (2) プレビューとポリゴン数の変化
+            EditorGUILayout.Space(4f);
             DrawPreviewControls(component, mesh, materials);
 
-            // 設定（ウィンドウ版と同じ名前）
-            EditorGUILayout.PropertyField(alphaThreshold, new GUIContent("アルファ閾値", alphaThreshold.tooltip));
-            EditorGUILayout.PropertyField(refineBoundary, new GUIContent("境界の細分化", refineBoundary.tooltip));
+            // (3) 基本設定（値は SerializedProperty に書き戻す: Undo と NDMF のプレビューの更新が効く）
+            EditorGUILayout.Space(8f);
+            EditorGUILayout.LabelField("基本設定", EditorStyles.boldLabel);
+            EditorGUI.BeginChangeCheck();
+            float threshold = MeshDeletionSettingsGUI.AlphaThreshold(alphaThreshold.floatValue);
+            if (EditorGUI.EndChangeCheck())
+                alphaThreshold.floatValue = threshold;
+            EditorGUILayout.Space(2f);
+            EditorGUI.BeginChangeCheck();
+            bool refine = MeshDeletionSettingsGUI.Refine(refineBoundary.boolValue);
+            if (EditorGUI.EndChangeCheck())
+                refineBoundary.boolValue = refine;
+            EditorGUILayout.Space(2f);
             EditorGUI.BeginDisabledGroup(!refineBoundary.boolValue);
-            EditorGUILayout.PropertyField(boundaryPrecisionTexels, new GUIContent("境界の精度（テクセル）", boundaryPrecisionTexels.tooltip));
-            string texelSizeHint = mesh != null ? texelSizeEstimator.GetHint(mesh, materials, component.IsSubMeshEnabled) : null;
-            if (texelSizeHint != null)
-                EditorGUILayout.LabelField(" ", texelSizeHint, EditorStyles.miniLabel);
-            showAdvancedSettings = EditorGUILayout.Foldout(showAdvancedSettings, "詳細設定");
+            EditorGUI.BeginChangeCheck();
+            float precision = MeshDeletionSettingsGUI.Precision(boundaryPrecisionTexels.floatValue, ref customPrecision,
+                MillimeterHint(mesh, materials, component, boundaryPrecisionTexels.floatValue));
+            if (EditorGUI.EndChangeCheck())
+                boundaryPrecisionTexels.floatValue = precision;
+            EditorGUI.EndDisabledGroup();
+
+            // (4) 処理対象のサブメッシュ
+            if (mesh != null && materials != null)
+            {
+                EditorGUILayout.Space(8f);
+                DrawSubMeshList(mesh, materials);
+            }
+
+            // (5) 詳細設定（既定で閉じる）
+            EditorGUILayout.Space(4f);
+            showAdvancedSettings = EditorGUILayout.Foldout(showAdvancedSettings, MeshDeletionSettingsGUI.AdvancedLabel, true);
             if (showAdvancedSettings)
             {
                 EditorGUI.indentLevel++;
-                EditorGUILayout.PropertyField(refineMaxDepth, new GUIContent("細分化の最大深さ", refineMaxDepth.tooltip));
-                EditorGUILayout.PropertyField(mergeAfterCut, new GUIContent("切断後の再結合", mergeAfterCut.tooltip));
+                EditorGUI.BeginDisabledGroup(!refineBoundary.boolValue);
+                EditorGUI.BeginChangeCheck();
+                int depth = MeshDeletionSettingsGUI.MaxDepth(refineMaxDepth.intValue);
+                if (EditorGUI.EndChangeCheck())
+                    refineMaxDepth.intValue = depth;
+                EditorGUI.BeginChangeCheck();
+                bool merge = MeshDeletionSettingsGUI.Merge(mergeAfterCut.boolValue);
+                if (EditorGUI.EndChangeCheck())
+                    mergeAfterCut.boolValue = merge;
+                EditorGUI.EndDisabledGroup();
+                if (!refineBoundary.boolValue)
+                    MeshDeletionSettingsGUI.Help("「輪郭に沿って細かく切る」がオフのときは使われません。");
                 EditorGUI.indentLevel--;
-            }
-            EditorGUI.EndDisabledGroup();
-
-            // サブメッシュ毎の処理対象（マテリアル名で表示。テクスチャの無いサブメッシュは処理できないので無効表示）
-            if (mesh != null && materials != null)
-            {
-                EditorGUILayout.Space();
-                EditorGUILayout.LabelField("処理対象のサブメッシュ", EditorStyles.boldLabel);
-                bool[] hasTexture = MeshDeletionRunner.SubMeshesWithTexture(mesh.subMeshCount, materials);
-                EnsureSubMeshArray(mesh.subMeshCount, hasTexture);
-                for (int subMeshIndex = 0; subMeshIndex < mesh.subMeshCount; subMeshIndex++)
-                {
-                    SerializedProperty element = subMeshEnabled.GetArrayElementAtIndex(subMeshIndex);
-                    Material material = subMeshIndex < materials.Length ? materials[subMeshIndex] : null;
-                    string label = "サブメッシュ " + subMeshIndex + ": " + (material != null ? material.name : "（マテリアルなし）") +
-                                   (hasTexture[subMeshIndex] ? "  [" + material.mainTexture.name + "]" : "  （テクスチャなし）");
-                    EditorGUI.BeginDisabledGroup(!hasTexture[subMeshIndex]);
-                    element.boolValue = EditorGUILayout.ToggleLeft(label, element.boolValue && hasTexture[subMeshIndex]);
-                    EditorGUI.EndDisabledGroup();
-                }
             }
 
             serializedObject.ApplyModifiedProperties();
         }
 
-        // プレイモードで誰が置き換えるか（NDMF / 簡易適用 / しない）の注意書き。判定は簡易適用（MeshDeletionPlayModeApplier）と同じ
-        private static void DrawPlayModeNote(MeshDeletionForTexture component)
+        // 「≈ 0.5〜0.9 mm 単位で輪郭に沿わせます」（1 テクセルの大きさの概算 × 精度。求められなければ null）
+        private string MillimeterHint(Mesh mesh, Material[] materials, MeshDeletionForTexture component, float precision)
         {
-            switch (MeshDeletionPlayModeApplier.ApplierFor(component))
+            if (mesh == null || !texelSizeEstimator.TryGetRange(mesh, materials, component.IsSubMeshEnabled, out float min, out float max))
+                return null;
+            return PrecisionPresets.MillimeterHint(min, max, precision);
+        }
+
+        // 処理対象のサブメッシュ: マテリアル名（「 (Instance)」を除く）とテクスチャ名（灰色）。テクスチャの無いサブメッシュは処理できないので無効表示と警告アイコン
+        private void DrawSubMeshList(Mesh mesh, Material[] materials)
+        {
+            bool[] hasTexture = MeshDeletionRunner.SubMeshesWithTexture(mesh.subMeshCount, materials);
+            EnsureSubMeshArray(mesh.subMeshCount, hasTexture);
+
+            Rect header = EditorGUILayout.GetControlRect();
+            Rect noneRect = new Rect(header.xMax - 72f, header.y, 72f, header.height);
+            Rect allRect = new Rect(noneRect.x - 74f, header.y, 72f, header.height);
+            EditorGUI.LabelField(new Rect(header.x, header.y, allRect.x - header.x, header.height),
+                new GUIContent("処理対象のサブメッシュ", "チェックしたサブメッシュ（マテリアル）だけを処理します。テクスチャの無いサブメッシュは処理できません。"), EditorStyles.boldLabel);
+            if (GUI.Button(allRect, new GUIContent("すべて選択", "テクスチャのある全てのサブメッシュを処理対象にします。"), EditorStyles.miniButtonLeft))
+                SetAllSubMeshes(hasTexture, true);
+            if (GUI.Button(noneRect, new GUIContent("すべて解除", "全てのサブメッシュを処理対象から外します。"), EditorStyles.miniButtonRight))
+                SetAllSubMeshes(hasTexture, false);
+
+            for (int subMeshIndex = 0; subMeshIndex < mesh.subMeshCount; subMeshIndex++)
             {
-                case PlayModeApplier.Ndmf:
-                    EditorGUILayout.HelpBox(MeshDeletionForTexture.Note, MessageType.Info);
-                    break;
-                case PlayModeApplier.None:
-                    EditorGUILayout.HelpBox("NDMF の Apply on Play（Tools/NDM Framework/Apply on Play）がオフのため、プレイモードでは置き換えません。アバターのアップロード時は NDMF が置き換えます。", MessageType.Warning);
-                    break;
-                default:
-#if NDMF
-                    EditorGUILayout.HelpBox("アバター（VRC Avatar Descriptor）の配下にないため、プレイモードでは MeshDeletionTool の簡易適用で置き換えます（プレイモードを終えると元に戻ります）。アップロード時の置き換えはアバターの配下でのみ行われます。", MessageType.Info);
-#else
-                    EditorGUILayout.HelpBox("NDMF（Non-Destructive Modular Framework）1.8.0 以降が見つかりません。プレイモードでは MeshDeletionTool の簡易適用で置き換えますが、アップロード時には置き換わりません。" +
-                                            "VCC / ALCOM で nadena.dev.ndmf をプロジェクトに追加してください（Modular Avatar を入れていれば一緒に入ります）。", MessageType.Warning);
-#endif
-                    break;
+                SerializedProperty element = subMeshEnabled.GetArrayElementAtIndex(subMeshIndex);
+                Material material = subMeshIndex < materials.Length ? materials[subMeshIndex] : null;
+                string materialName = material != null ? PolygonStatsFormat.MaterialDisplayName(material.name) : "（マテリアルなし）";
+                string textureName = hasTexture[subMeshIndex] ? material.mainTexture.name : null;
+
+                Rect row = EditorGUILayout.GetControlRect();
+                float textureWidth = textureName != null ? Mathf.Min(GreyMiniLabel.CalcSize(new GUIContent(textureName)).x + 4f, row.width * 0.35f) : 0f;
+                Rect textureRect = new Rect(row.xMax - textureWidth, row.y, textureWidth, row.height);
+                Rect toggleRect = new Rect(row.x, row.y, row.width - textureWidth - 4f, row.height);
+                if (hasTexture[subMeshIndex])
+                {
+                    string tooltip = "サブメッシュ " + subMeshIndex + ": " + materialName + "（テクスチャ " + textureName + "）";
+                    EditorGUI.BeginChangeCheck();
+                    bool enabled = EditorGUI.ToggleLeft(toggleRect, new GUIContent(subMeshIndex + "  " + materialName, tooltip), element.boolValue);
+                    if (EditorGUI.EndChangeCheck())
+                        element.boolValue = enabled;
+                    EditorGUI.LabelField(textureRect, new GUIContent(textureName, "メインテクスチャ"), GreyMiniLabel);
+                }
+                else
+                {
+                    string tooltip = "メインテクスチャ（Texture2D）が無いため処理できません。";
+                    EditorGUI.BeginDisabledGroup(true);
+                    EditorGUI.ToggleLeft(toggleRect, new GUIContent(subMeshIndex + "  " + materialName, tooltip), false);
+                    EditorGUI.EndDisabledGroup();
+                    Rect iconRect = new Rect(row.xMax - 18f, row.y, 18f, row.height);
+                    GUIContent warning = EditorGUIUtility.IconContent("console.warnicon.sml");
+                    EditorGUI.LabelField(iconRect, new GUIContent(warning.image, tooltip));
+                    if (element.boolValue)
+                        element.boolValue = false;
+                }
             }
         }
 
-        // プレビューのボタンと状態。NDMF のプレビュー（MeshDeletionPreviewFilter）を切り替える。シーン上の全ての MeshDeletionForTexture で共通
+        private void SetAllSubMeshes(bool[] hasTexture, bool value)
+        {
+            for (int subMeshIndex = 0; subMeshIndex < hasTexture.Length && subMeshIndex < subMeshEnabled.arraySize; subMeshIndex++)
+                subMeshEnabled.GetArrayElementAtIndex(subMeshIndex).boolValue = value && hasTexture[subMeshIndex];
+        }
+
+        private static GUIStyle greyMiniLabel;
+        private static GUIStyle GreyMiniLabel
+        {
+            get
+            {
+                if (greyMiniLabel == null)
+                {
+                    greyMiniLabel = new GUIStyle(EditorStyles.miniLabel) { alignment = TextAnchor.MiddleRight };
+                    greyMiniLabel.normal.textColor = EditorGUIUtility.isProSkin ? new Color(0.58f, 0.58f, 0.58f) : new Color(0.42f, 0.42f, 0.42f);
+                }
+                return greyMiniLabel;
+            }
+        }
+
+        // (1) 状態: プレイモード・アップロードで誰が置き換えるか（NDMF / 簡易適用 / しない）を 1 行で。判定は簡易適用（MeshDeletionPlayModeApplier）と同じ
+        // 詳しい説明は「説明」の折りたたみに入れる
+        private void DrawStatus(MeshDeletionForTexture component)
+        {
+            PlayModeApplier applier = MeshDeletionPlayModeApplier.ApplierFor(component);
+            switch (applier)
+            {
+                case PlayModeApplier.Ndmf:
+                    StatusLine("プレイモードとアップロードのときに NDMF が置き換えます（元のメッシュは変更しません）", MessageType.Info);
+                    break;
+                case PlayModeApplier.None:
+                    EditorGUILayout.HelpBox("NDMF の Apply on Play がオフのため、プレイモードでは置き換えません（アップロード時は置き換えます）。", MessageType.Warning);
+                    break;
+                default:
+#if NDMF
+                    StatusLine("アバターの外にあるため、プレイモードでは簡易適用で置き換えます", MessageType.Info);
+#else
+                    EditorGUILayout.HelpBox("NDMF 1.8.0 以降が見つかりません。アップロード時には置き換わりません（プレイモードは簡易適用）。", MessageType.Warning);
+#endif
+                    break;
+            }
+
+            showExplanation = EditorGUILayout.Foldout(showExplanation, "説明", true);
+            if (showExplanation)
+            {
+                EditorGUI.indentLevel++;
+                MeshDeletionSettingsGUI.Help("テクスチャの透明な部分に合わせてメッシュを削ります。付けただけでは何も変わらず、" + MeshDeletionForTexture.Note);
+                switch (applier)
+                {
+                    case PlayModeApplier.None:
+                        MeshDeletionSettingsGUI.Help("プレイモードで置き換えるには Tools/NDM Framework/Apply on Play をオンにしてください。");
+                        break;
+                    case PlayModeApplier.Fallback:
+#if NDMF
+                        MeshDeletionSettingsGUI.Help("アバター（VRC Avatar Descriptor）の配下にないものは、プレイモードでは MeshDeletionTool の簡易適用が置き換えます" +
+                                                     "（プレイモードを終えると元に戻ります）。アップロード時の置き換えはアバターの配下でのみ行われます。");
+#else
+                        MeshDeletionSettingsGUI.Help("NDMF（Non-Destructive Modular Framework）が無いため、プレイモードでは MeshDeletionTool の簡易適用が置き換えます。" +
+                                                     "アップロード時にも置き換えるには、VCC / ALCOM で nadena.dev.ndmf をプロジェクトに追加してください（Modular Avatar を入れていれば一緒に入ります）。");
+#endif
+                        break;
+                }
+                MeshDeletionSettingsGUI.Help("プレビューは NDMF が作る表示用のコピーだけを変えるので、元のメッシュ・シーン・プレハブは変更されず、保存もされません。" +
+                                             "シーン上の全ての MeshDeletionForTexture がまとめてプレビューされます。");
+                EditorGUI.indentLevel--;
+            }
+        }
+
+        private static void StatusLine(string text, MessageType type)
+        {
+            string icon = type == MessageType.Warning ? "console.warnicon.sml" : "console.infoicon.sml";
+            GUIStyle style = new GUIStyle(EditorStyles.label) { wordWrap = true };
+            EditorGUILayout.LabelField(new GUIContent(text, EditorGUIUtility.IconContent(icon).image), style);
+        }
+
+        // (2) プレビューのボタンと状態。NDMF のプレビュー（MeshDeletionPreviewFilter）を切り替える。シーン上の全ての MeshDeletionForTexture で共通
+        // オンのときはこの Renderer のポリゴン数の変化を出す
         private void DrawPreviewControls(MeshDeletionForTexture component, Mesh mesh, Material[] materials)
         {
+            const string previewTooltip = "プレイモードに入らずに、適用後の表示をシーンビューで確認します。NDMF が作る表示用のコピーだけを変えるので、" +
+                                          "元のメッシュ・シーン・プレハブは変更されず、保存もされません。";
 #if NDMF
             bool previewOn = MeshDeletionPreviewFilter.Toggle.IsEnabled.Value;
             EditorGUI.BeginDisabledGroup(EditorApplication.isPlayingOrWillChangePlaymode);
-            bool requested = GUILayout.Toggle(previewOn, previewOn ? "プレビュー: オン" : "プレビュー: オフ", "Button");
+            bool requested = GUILayout.Toggle(previewOn, new GUIContent(previewOn ? "プレビュー: オン" : "プレビュー: オフ", previewTooltip), "Button", GUILayout.Height(24f));
             EditorGUI.EndDisabledGroup();
             if (requested != previewOn)
             {
@@ -157,24 +293,23 @@ namespace MeshDeletionTool
             }
             else if (!previewOn)
             {
-                EditorGUILayout.LabelField("オンにすると、プレイモードに入らずに適用後の表示を確認できます。", EditorStyles.miniLabel);
-                EditorGUILayout.LabelField("プレビューをオンにするとポリゴン数の変化が表示されます。", EditorStyles.miniLabel);
+                MeshDeletionSettingsGUI.Help("プレビューをオンにするとポリゴン数の変化が表示されます。");
             }
             else if (!Menu.GetChecked(MeshDeletionPreviewFilter.NdmfEnablePreviewsMenu))
             {
-                EditorGUILayout.HelpBox("NDMF のプレビューが無効になっているため表示されません（" + MeshDeletionPreviewFilter.NdmfEnablePreviewsMenu + "）。", MessageType.Warning);
+                EditorGUILayout.HelpBox("NDMF のプレビューが無効です（" + MeshDeletionPreviewFilter.NdmfEnablePreviewsMenu + "）。", MessageType.Warning);
                 if (GUILayout.Button("NDMF のプレビューを有効にする"))
                     EditorApplication.ExecuteMenuItem(MeshDeletionPreviewFilter.NdmfEnablePreviewsMenu);
             }
             else
             {
-                EditorGUILayout.HelpBox("プレビュー中（NDMF）: シーン上の全ての MeshDeletionForTexture を適用した表示です。NDMF が作る表示用のコピーだけを変えるので、" +
-                                        "元のメッシュ・シーン・プレハブは変更されず、保存もされません。", MessageType.Info);
+                EditorGUILayout.BeginVertical(EditorStyles.helpBox);
                 DrawPolygonStats(component, mesh, materials);
+                EditorGUILayout.EndVertical();
             }
 #else
             EditorGUI.BeginDisabledGroup(true);
-            GUILayout.Toggle(false, "プレビュー: オフ", "Button");
+            GUILayout.Toggle(false, new GUIContent("プレビュー: オフ", previewTooltip), "Button", GUILayout.Height(24f));
             EditorGUI.EndDisabledGroup();
             EditorGUILayout.LabelField("プレビューには NDMF 1.8.0 以降が必要です。", EditorStyles.miniLabel);
 #endif

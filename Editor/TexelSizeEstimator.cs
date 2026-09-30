@@ -3,8 +3,8 @@ using UnityEngine;
 
 namespace MeshDeletionTool
 {
-    // 「1 テクセル ≈ 0.6〜0.9 mm」の表示用の概算（ウィンドウとインスペクターで共用）
-    // サブメッシュ毎に sqrt(3D 面積の合計 / テクセル空間での UV 面積の合計) を求め、処理対象のサブメッシュの範囲を文字列にする
+    // 1 テクセルの大きさ（mm）の概算（ウィンドウとインスペクターで共用。「≈ 0.5〜0.9 mm 単位で輪郭に沿わせます」の表示に使う）
+    // サブメッシュ毎に sqrt(3D 面積の合計 / テクセル空間での UV 面積の合計) を求め、処理対象のサブメッシュの範囲（最小〜最大）を返す
     internal sealed class TexelSizeEstimator
     {
         // 直前に計算したメッシュとテクスチャ解像度（同じなら計算し直さない）
@@ -12,11 +12,13 @@ namespace MeshDeletionTool
         private Vector2Int[] cacheTextureSizes;
         private float[] cacheMillimeters;
 
-        // 表示文字列を返す（処理対象（isTarget）のサブメッシュの範囲。対象が無ければテクスチャを持つ全サブメッシュ。求められなければ null）
-        public string GetHint(Mesh mesh, Material[] materials, Func<int, bool> isTarget)
+        // 処理対象（isTarget）のサブメッシュの 1 テクセルの大きさ（mm）の範囲。対象が無ければテクスチャを持つ全サブメッシュ。求められなければ false
+        public bool TryGetRange(Mesh mesh, Material[] materials, Func<int, bool> isTarget, out float min, out float max)
         {
+            min = 0f;
+            max = 0f;
             if (mesh == null || materials == null)
-                return null;
+                return false;
             Vector2Int[] textureSizes = GetTextureSizes(mesh.subMeshCount, materials);
             if (cacheMesh != mesh || cacheTextureSizes == null || !TextureSizesEqual(cacheTextureSizes, textureSizes))
             {
@@ -24,7 +26,7 @@ namespace MeshDeletionTool
                 cacheTextureSizes = textureSizes;
                 cacheMillimeters = ComputeTexelSizeMillimeters(mesh, textureSizes);
             }
-            float min = float.MaxValue, max = 0f;
+            min = float.MaxValue;
             for (int pass = 0; pass < 2 && max == 0f; pass++)
             {
                 for (int subMeshIndex = 0; subMeshIndex < cacheMillimeters.Length; subMeshIndex++)
@@ -37,9 +39,11 @@ namespace MeshDeletionTool
                 }
             }
             if (max == 0f)
-                return null;
-            string range = min.ToString("0.0") == max.ToString("0.0") ? min.ToString("0.0") : min.ToString("0.0") + "〜" + max.ToString("0.0");
-            return "1 テクセル ≈ " + range + " mm（対象のテクスチャ解像度とメッシュから概算）";
+            {
+                min = 0f;
+                return false;
+            }
+            return true;
         }
 
         // サブメッシュ毎のメインテクスチャの解像度（テクスチャが無ければ 0）

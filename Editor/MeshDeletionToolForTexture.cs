@@ -31,6 +31,9 @@ namespace MeshDeletionTool
         // 詳細設定の折りたたみ
         private bool showAdvancedSettings = false;
 
+        // 切り抜きの精度で「カスタム」を選んでいる（MeshDeletionSettingsGUI.Precision）
+        private bool customPrecision;
+
         // テスト・計測用: null でなければ自動選択の代わりにこのバックエンドで処理する（呼び出し側が Dispose する）
         internal IAlphaStageBackend backendOverride;
 
@@ -63,31 +66,28 @@ namespace MeshDeletionTool
             Mesh originalMesh = targetRenderer != null ? MeshDeletionRunner.GetOriginalMesh(targetRenderer) : null;
             Material[] originalMaterials = targetRenderer != null ? MeshDeletionRunner.GetOriginalMaterials(targetRenderer) : null;
 
-            // アルファ閾値を指定するスライダーを追加
-            GUILayout.Label("\n②アルファ閾値を設定", EditorStyles.boldLabel);
-            alphaThreshold = EditorGUILayout.Slider("アルファ閾値", alphaThreshold, 0f, 1f);
-
-            // 境界の細分化の設定
-            refineBoundary = EditorGUILayout.Toggle("境界の細分化", refineBoundary);
+            // 設定（名前・説明・ツールチップはインスペクターと共通: MeshDeletionSettingsGUI）
+            GUILayout.Label("\n②設定", EditorStyles.boldLabel);
+            alphaThreshold = MeshDeletionSettingsGUI.AlphaThreshold(alphaThreshold);
+            refineBoundary = MeshDeletionSettingsGUI.Refine(refineBoundary);
             EditorGUI.BeginDisabledGroup(!refineBoundary);
-            boundaryPrecisionTexels = EditorGUILayout.Slider("境界の精度（テクセル）", boundaryPrecisionTexels, 0.5f, 4f);
-            if (targetRenderer != null)
+            string millimeterHint = null;
+            if (targetRenderer != null && texelSizeEstimator.TryGetRange(originalMesh, originalMaterials, subMeshIndex => subMeshVisibility.TryGetValue(subMeshIndex, out bool visible) && visible, out float texelMin, out float texelMax))
             {
-                string texelSizeHint = texelSizeEstimator.GetHint(originalMesh, originalMaterials, subMeshIndex => subMeshVisibility.TryGetValue(subMeshIndex, out bool visible) && visible);
-                if (texelSizeHint != null)
-                {
-                    EditorGUILayout.LabelField(" ", texelSizeHint, EditorStyles.miniLabel);
-                }
+                millimeterHint = PrecisionPresets.MillimeterHint(texelMin, texelMax, boundaryPrecisionTexels);
             }
-            showAdvancedSettings = EditorGUILayout.Foldout(showAdvancedSettings, "詳細設定");
+            boundaryPrecisionTexels = MeshDeletionSettingsGUI.Precision(boundaryPrecisionTexels, ref customPrecision, millimeterHint);
+            EditorGUI.EndDisabledGroup();
+            showAdvancedSettings = EditorGUILayout.Foldout(showAdvancedSettings, MeshDeletionSettingsGUI.AdvancedLabel, true);
             if (showAdvancedSettings)
             {
                 EditorGUI.indentLevel++;
-                refineMaxDepth = EditorGUILayout.IntSlider("細分化の最大深さ", refineMaxDepth, 0, 5);
-                mergeCutPolygons = EditorGUILayout.Toggle("切断後の再結合", mergeCutPolygons);
+                EditorGUI.BeginDisabledGroup(!refineBoundary);
+                refineMaxDepth = MeshDeletionSettingsGUI.MaxDepth(refineMaxDepth);
+                mergeCutPolygons = MeshDeletionSettingsGUI.Merge(mergeCutPolygons);
+                EditorGUI.EndDisabledGroup();
                 EditorGUI.indentLevel--;
             }
-            EditorGUI.EndDisabledGroup();
 
             // サブメッシュを選択するリストを表示
             GUILayout.Label("\n③サブメッシュ一覧から処理対象を選択", EditorStyles.boldLabel);

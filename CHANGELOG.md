@@ -15,3 +15,4 @@
 * Inspector の設定を平易な名前と説明（ツールチップ）に整理し、切り抜きの精度のプリセット（高精度 / 標準 / 軽量 / 最軽量 / カスタム）と mm 単位の目安表示を追加
 * Box による削除、色情報の表示、境界の検出、CSV グラフ、ベンチマークのウィンドウを削除し、手動のウィンドウは NDMF と同じ処理（`MeshDeletionRunner`）を通すようにした
 * Runtime / Editor / Tests の asmdef と UPM / VPM 用の `package.json` を追加。`.meta` をコミットし、Unity を使わずに unitypackage と UPM zip を作る `build/` スクリプトと Roslyn によるコンパイル確認スクリプトを追加
+* ライセンスを MIT に変更（`LICENSE` を追加。2024 年 6 月から README に記載していた独自の利用条件は廃止）

@@ -206,29 +206,11 @@ unitypackage は Unity のエクスポートと同じ形式（`archtemp.tar` を
 
 # License
 
-著作権 (c) 2024 おちょこ<br>
-無断転載・複製を禁じます。<br>
+MIT License（[LICENSE](LICENSE) を参照）
 
-本ソフトウェアは、おちょこ（以下「著作権者」）が著作権を有します。著作権者は、本ソフトウェアの使用を以下の条件のもとに許可します。
+Copyright (c) 2024-2026 おちょこ (fnc765)
 
-1. 使用許可<br>
-   本ソフトウェアは、事前の書面による許可を得た場合に限り、商用目的に使用することができます。
-
-2. 禁止事項<br>
-   a. 本ソフトウェアの全部または一部を無断で複製、改変、配布、再配布することを禁止します。<br>
-   b. 本ソフトウェアをリバースエンジニアリング、逆コンパイル、逆アセンブルすることを禁止します。<br>
-   c. 本ソフトウェアを第三者にサブライセンスすることを禁止します。
-
-3. 免責事項<br>
-   本ソフトウェアは「現状有姿」で提供されます。著作権者は、本ソフトウェアに関していかなる保証も行いません。著作権者は、本ソフトウェアの使用または使用不能から生じるいかなる損害についても責任を負いません。
-
-4. その他<br>
-   本契約のいかなる部分も、適用される法律に反する場合には、その部分のみが無効となり、それ以外の部分は引き続き有効とします。
-
-詳細については、[おちょこのX(旧Twitter)アカウント](https://twitter.com/ochoco0215)までお問い合わせください。
-
-著作権者：おちょこ<br>
-連絡先：[おちょこのX(旧Twitter)アカウント](https://twitter.com/ochoco0215)
+本ソフトウェアは MIT ライセンスで公開しています。著作権表示とライセンス条文（LICENSE）を残せば、改変・再配布・商用利用を含めて自由に利用できます。本ソフトウェアは「現状有姿」で提供され、いかなる保証もありません。
 
 # English summary
 
@@ -241,4 +223,4 @@ The `MeshDeletionForTexture` component is applied non-destructively by an NDMF p
 Requirements: Unity 2022.3, NDMF 1.8.0 or later for the non-destructive path (optional), VRChat SDK optional.
 Known limitations: transparent holes inside fully opaque triangles are not carved (a symmetric refinement rule and bilinear alpha sampling are documented as future work), a sub-texel transparent sliver remains along cuts with opaque shaders, nearest-texel staircase up to one texel, at most four bone weights per vertex.
 `build/` holds Python scripts that build and verify the unitypackages and the UPM zip without Unity, and a Roslyn-based compile check (`UNITY_EDITOR_DIR=... build/compile_check.sh`); `.meta` files are committed so every install method shares the same GUIDs.
-See the License section above for the license terms.
+Licensed under the MIT License (see [LICENSE](LICENSE)).

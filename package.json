@@ -8,7 +8,7 @@
         "name": "おちょこ",
         "url": "https://twitter.com/ochoco0215"
     },
-    "license": "SEE LICENSE IN README.md",
+    "license": "MIT",
     "vpmDependencies": {
         "nadena.dev.ndmf": ">=1.8.0"
     }

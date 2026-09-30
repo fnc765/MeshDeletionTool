@@ -66,16 +66,21 @@ namespace MeshDeletionTool
 
         // 1 つの Renderer のプレビュー。生成したメッシュ（MeshCache の項目）を毎フレーム プロキシに割り当てる
         // （NDMF はプロキシを毎フレーム元の Renderer の状態に戻してから各ノードの OnFrame を呼ぶ）
+        // 表示する結果のポリゴン数は MeshDeletionPreviewStats に残し（インスペクターが表示する）、ノードの破棄で取り下げる
         private sealed class Node : IRenderFilterNode
         {
+            private readonly Renderer original;
             private readonly MeshCache.Entry entry;
 
             public RenderAspects WhatChanged { get; private set; }
 
-            private Node(MeshCache.Entry entry)
+            private Node(Renderer original, MeshCache.Entry entry)
             {
+                this.original = original;
                 this.entry = entry;
                 WhatChanged = RenderAspects.Mesh;
+                if (entry != null)
+                    MeshDeletionPreviewStats.Publish(original, entry.Record);
             }
 
             // context で設定（MeshDeletionForTexture の各項目）を監視し、入力（プロキシのメッシュ・マテリアル・テクスチャ）と設定が同じなら
@@ -86,7 +91,7 @@ namespace MeshDeletionTool
                 // 入力は前段のプレビュー（他のプラグイン）を反映したプロキシのメッシュとマテリアル（ビルドでも前段の処理の後に実行される）
                 Mesh inputMesh = MeshDeletionRunner.GetOriginalMesh(proxy, false);
                 if (component == null || inputMesh == null)
-                    return new Node(null);
+                    return new Node(original, null);
                 int subMeshCount = inputMesh.subMeshCount;
                 string settingsKey = context.Observe(component,
                     c => MeshDeletionRunner.OptionsFromComponent(c, subMeshCount).SettingsKey(),
@@ -98,7 +103,7 @@ namespace MeshDeletionTool
                     prior.WhatChanged = 0;
                     return prior;
                 }
-                return new Node(MeshCache.Acquire(key, forceRecompute, () => Compute(component, original, proxy)));
+                return new Node(original, MeshCache.Acquire(key, forceRecompute, () => Compute(component, original, proxy, settingsKey)));
             }
 
             public Task<IRenderFilterNode> Refresh(IEnumerable<(Renderer, Renderer)> proxyPairs, ComputeContext context, RenderAspects updatedAspects)
@@ -125,8 +130,10 @@ namespace MeshDeletionTool
 
             public void Dispose()
             {
-                if (entry != null)
-                    MeshCache.Release(entry);
+                if (entry == null)
+                    return;
+                MeshDeletionPreviewStats.Withdraw(original, entry.Record);
+                MeshCache.Release(entry);
             }
         }
 
@@ -143,15 +150,18 @@ namespace MeshDeletionTool
             return key.ToString();
         }
 
-        // プロキシのメッシュを component の設定で削る（計算バックエンドは自動）。処理できなければ理由を 1 行ログに出し、メッシュ無しの項目にする
-        private static MeshCache.Entry Compute(MeshDeletionForTexture component, Renderer original, Renderer proxy)
+        // プロキシのメッシュを component の設定（settingsKey はその SettingsKey）で削る（計算バックエンドは自動）
+        // 処理できなければ理由を 1 行ログに出し、メッシュ無しの項目にする。どちらの場合もインスペクター用の記録（Record）を付ける
+        private static MeshCache.Entry Compute(MeshDeletionForTexture component, Renderer original, Renderer proxy, string settingsKey)
         {
             MeshCache.Entry entry = new MeshCache.Entry { InputMesh = MeshDeletionRunner.GetOriginalMesh(proxy, false) };
+            entry.Record = new MeshDeletionPreviewStats.Record { SettingsKey = settingsKey, UpdatedAt = DateTime.Now };
             string name = original.gameObject.name;
             string problem = MeshDeletionRunner.FindMeshProblem(entry.InputMesh, true);
             if (problem != null)
             {
                 Debug.LogWarning("[プレビュー] '" + name + "': " + problem, original);
+                entry.Record.Problem = problem;
                 return entry;
             }
             try
@@ -162,11 +172,13 @@ namespace MeshDeletionTool
                 entry.Mesh = result.Mesh;
                 entry.Mesh.name += "_preview";
                 entry.Mesh.hideFlags = HideFlags.DontSave;
+                entry.Record.Stats = result.Stats;
                 Debug.Log("[プレビュー] " + result.Summary + "（'" + name + "'）", original);
             }
             catch (Exception e)
             {
                 Debug.LogWarning("[プレビュー] '" + name + "' のプレビューを作れませんでした: " + e.Message, original);
+                entry.Record.Problem = "プレビューを作れませんでした: " + e.Message;
             }
             return entry;
         }
@@ -181,6 +193,8 @@ namespace MeshDeletionTool
                 public Mesh InputMesh;
                 // 削った結果（処理できなかったときは null）
                 public Mesh Mesh;
+                // インスペクターに表示するポリゴン数（処理できなかったときは理由）
+                public MeshDeletionPreviewStats.Record Record;
                 public int References;
             }
 

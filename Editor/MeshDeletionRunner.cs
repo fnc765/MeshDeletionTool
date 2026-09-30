@@ -16,6 +16,8 @@ namespace MeshDeletionTool
         public string Summary;
         // サブメッシュ毎の、出力メッシュの三角形番号 → 元のメッシュの三角形番号
         public List<int[]> OutputTriangleParents;
+        // 処理前後のポリゴン数・頂点数と処理時間（プレビューのインスペクター表示用）
+        public PolygonStats Stats;
     }
 
     internal static class MeshDeletionRunner
@@ -36,11 +38,13 @@ namespace MeshDeletionTool
 
             if (log == null)
                 log = Debug.Log;
+            System.Diagnostics.Stopwatch stopwatch = System.Diagnostics.Stopwatch.StartNew();
             string backendNote = null;
             IAlphaStageBackend backend = backendOverride ?? CreateBackend(options.RefineEnabled, out backendNote);
             if (backendNote != null)
                 log(backendNote);
             AlphaMeshDeletionPipeline pipeline = options.CreatePipeline(backend, log);
+            string backendKind = backend.Name != null && backend.Name.StartsWith("GPU", StringComparison.Ordinal) ? "GPU" : "CPU";
             MeshArrays sourceArrays, newArrays;
             try
             {
@@ -54,11 +58,14 @@ namespace MeshDeletionTool
 
             Mesh newMesh = MeshArraysUnityAdapter.ToMesh(newArrays);
             newMesh.name = originalMesh.name + "_deleted";
+            stopwatch.Stop();
             return new MeshDeletionResult
             {
                 Mesh = newMesh,
                 Summary = DescribeResult(originalMesh.name, sourceArrays, newArrays, pipeline),
-                OutputTriangleParents = pipeline.OutputTriangleParents
+                OutputTriangleParents = pipeline.OutputTriangleParents,
+                Stats = PolygonStats.FromMeshes(sourceArrays, newArrays, ProcessedSubMeshes(options, originalMesh.subMeshCount, GetOriginalMaterials(renderer, false)),
+                                                stopwatch.Elapsed.TotalMilliseconds, backendKind)
             };
         }
 
@@ -81,6 +88,18 @@ namespace MeshDeletionTool
                     options.TargetSubMeshes[subMeshIndex] = component.IsSubMeshEnabled(subMeshIndex);
             }
             return options;
+        }
+
+        // 処理対象になったサブメッシュ（設定で選ばれ、かつメインテクスチャを持つもの。選択が null ならテクスチャを持つ全て）
+        internal static bool[] ProcessedSubMeshes(MeshDeletionOptions options, int subMeshCount, Material[] materials)
+        {
+            bool[] processed = SubMeshesWithTexture(subMeshCount, materials ?? new Material[0]);
+            if (options.TargetSubMeshes != null)
+            {
+                for (int subMeshIndex = 0; subMeshIndex < subMeshCount; subMeshIndex++)
+                    processed[subMeshIndex] &= subMeshIndex < options.TargetSubMeshes.Length && options.TargetSubMeshes[subMeshIndex];
+            }
+            return processed;
         }
 
         // Renderer が描いている Mesh（SkinnedMeshRenderer の sharedMesh、または MeshRenderer と同じオブジェクトの MeshFilter の sharedMesh）

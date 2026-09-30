@@ -15,6 +15,7 @@ namespace MeshDeletionTool
         private SerializedProperty mergeAfterCut;
         private SerializedProperty subMeshEnabled;
         private bool showAdvancedSettings;
+        private bool showSubMeshStats;
         private readonly TexelSizeEstimator texelSizeEstimator = new TexelSizeEstimator();
 
         private void OnEnable()
@@ -25,17 +26,21 @@ namespace MeshDeletionTool
             refineMaxDepth = serializedObject.FindProperty(nameof(MeshDeletionForTexture.refineMaxDepth));
             mergeAfterCut = serializedObject.FindProperty(nameof(MeshDeletionForTexture.mergeAfterCut));
             subMeshEnabled = serializedObject.FindProperty(nameof(MeshDeletionForTexture.subMeshEnabled));
+            MeshDeletionPreviewStats.Changed += Repaint;
 #if NDMF
             MeshDeletionPreviewFilter.Toggle.IsEnabled.OnChange += OnPreviewToggleChanged;
 #endif
         }
 
-#if NDMF
         private void OnDisable()
         {
+            MeshDeletionPreviewStats.Changed -= Repaint;
+#if NDMF
             MeshDeletionPreviewFilter.Toggle.IsEnabled.OnChange -= OnPreviewToggleChanged;
+#endif
         }
 
+#if NDMF
         // NDMF のプレビュー設定ウィンドウから切り替えられたときもボタンの表示を合わせる
         private void OnPreviewToggleChanged(bool enabled)
         {
@@ -68,7 +73,7 @@ namespace MeshDeletionTool
                     EditorGUILayout.HelpBox(problem, MessageType.Error);
             }
             DrawPlayModeNote(component);
-            DrawPreviewControls();
+            DrawPreviewControls(component, mesh, materials);
 
             // 設定（ウィンドウ版と同じ名前）
             EditorGUILayout.PropertyField(alphaThreshold, new GUIContent("アルファ閾値", alphaThreshold.tooltip));
@@ -133,7 +138,7 @@ namespace MeshDeletionTool
         }
 
         // プレビューのボタンと状態。NDMF のプレビュー（MeshDeletionPreviewFilter）を切り替える。シーン上の全ての MeshDeletionForTexture で共通
-        private static void DrawPreviewControls()
+        private void DrawPreviewControls(MeshDeletionForTexture component, Mesh mesh, Material[] materials)
         {
 #if NDMF
             bool previewOn = MeshDeletionPreviewFilter.Toggle.IsEnabled.Value;
@@ -153,6 +158,7 @@ namespace MeshDeletionTool
             else if (!previewOn)
             {
                 EditorGUILayout.LabelField("オンにすると、プレイモードに入らずに適用後の表示を確認できます。", EditorStyles.miniLabel);
+                EditorGUILayout.LabelField("プレビューをオンにするとポリゴン数の変化が表示されます。", EditorStyles.miniLabel);
             }
             else if (!Menu.GetChecked(MeshDeletionPreviewFilter.NdmfEnablePreviewsMenu))
             {
@@ -164,6 +170,7 @@ namespace MeshDeletionTool
             {
                 EditorGUILayout.HelpBox("プレビュー中（NDMF）: シーン上の全ての MeshDeletionForTexture を適用した表示です。NDMF が作る表示用のコピーだけを変えるので、" +
                                         "元のメッシュ・シーン・プレハブは変更されず、保存もされません。", MessageType.Info);
+                DrawPolygonStats(component, mesh, materials);
             }
 #else
             EditorGUI.BeginDisabledGroup(true);
@@ -171,6 +178,79 @@ namespace MeshDeletionTool
             EditorGUI.EndDisabledGroup();
             EditorGUILayout.LabelField("プレビューには NDMF 1.8.0 以降が必要です。", EditorStyles.miniLabel);
 #endif
+        }
+
+        // プレビュー中の結果のポリゴン数（三角形数）の変化。MeshDeletionPreviewFilter が残した、この Renderer の結果を表示する
+        // 結果がまだ無い、または現在の設定と違う設定の結果なら「計算中…」を出す（結果が届くと MeshDeletionPreviewStats.Changed で再描画する）
+        private void DrawPolygonStats(MeshDeletionForTexture component, Mesh mesh, Material[] materials)
+        {
+            MeshDeletionPreviewStats.Record record = MeshDeletionPreviewStats.Get(component.TargetRenderer);
+            string currentKey = mesh != null ? MeshDeletionRunner.OptionsFromComponent(component, mesh.subMeshCount).SettingsKey() : null;
+            if (record == null)
+            {
+                EditorGUILayout.LabelField("計算中…", EditorStyles.miniBoldLabel);
+                return;
+            }
+            if (record.Problem != null)
+            {
+                EditorGUILayout.HelpBox(record.Problem, MessageType.Warning);
+                return;
+            }
+            bool stale = currentKey != null && record.SettingsKey != currentKey;
+            PolygonStats stats = record.Stats;
+            if (stats == null)
+                return;
+
+            EditorGUI.BeginDisabledGroup(stale);
+            GUIStyle headline = new GUIStyle(EditorStyles.boldLabel) { fontSize = EditorStyles.boldLabel.fontSize + 1, wordWrap = true };
+            headline.normal.textColor = LevelColor(PolygonStatsFormat.Level(stats.OriginalTriangles, stats.GeneratedTriangles));
+            EditorGUILayout.LabelField(new GUIContent(PolygonStatsFormat.TriangleLine(stats),
+                "Unity と VRChat はポリゴン数を三角形の数で数えます。緑: +20% 以下（または減少）、黄: +50% 以下、赤: それより多い"), headline);
+            EditorGUILayout.LabelField(PolygonStatsFormat.VertexLine(stats), EditorStyles.miniLabel);
+            EditorGUILayout.LabelField(PolygonStatsFormat.TimeLine(stats) + "　" + record.UpdatedAt.ToString("HH:mm:ss") + " 更新", EditorStyles.miniLabel);
+            EditorGUI.EndDisabledGroup();
+            if (stale)
+                EditorGUILayout.LabelField("計算中…（設定を変更しました）", EditorStyles.miniBoldLabel);
+
+            showSubMeshStats = EditorGUILayout.Foldout(showSubMeshStats, "サブメッシュ別", true);
+            if (showSubMeshStats)
+            {
+                EditorGUI.indentLevel++;
+                for (int subMeshIndex = 0; subMeshIndex < stats.SubMeshTrianglesBefore.Length; subMeshIndex++)
+                {
+                    Material material = materials != null && subMeshIndex < materials.Length ? materials[subMeshIndex] : null;
+                    string name = subMeshIndex + ": " + (material != null ? PolygonStatsFormat.MaterialDisplayName(material.name) : "（マテリアルなし）");
+                    Rect row = EditorGUILayout.GetControlRect(false, EditorGUIUtility.singleLineHeight * 0.9f);
+                    Rect percentRect = new Rect(row.xMax - 56f, row.y, 56f, row.height);
+                    Rect countsRect = new Rect(percentRect.x - 112f, row.y, 108f, row.height);
+                    Rect nameRect = new Rect(row.x, row.y, Mathf.Max(0f, countsRect.x - row.x - 4f), row.height);
+                    EditorGUI.LabelField(nameRect, new GUIContent(name, name), EditorStyles.miniLabel);
+                    EditorGUI.LabelField(countsRect, PolygonStatsFormat.SubMeshCounts(stats, subMeshIndex), RightMiniLabel);
+                    GUIStyle percentStyle = new GUIStyle(RightMiniLabel);
+                    if (stats.SubMeshProcessed[subMeshIndex])
+                        percentStyle.normal.textColor = LevelColor(PolygonStatsFormat.Level(stats.SubMeshTrianglesBefore[subMeshIndex], stats.SubMeshTrianglesAfter[subMeshIndex]));
+                    EditorGUI.LabelField(percentRect, PolygonStatsFormat.SubMeshPercent(stats, subMeshIndex), percentStyle);
+                }
+                EditorGUI.indentLevel--;
+            }
+        }
+
+        private static GUIStyle rightMiniLabel;
+        private static GUIStyle RightMiniLabel => rightMiniLabel ?? (rightMiniLabel = new GUIStyle(EditorStyles.miniLabel) { alignment = TextAnchor.MiddleRight });
+
+        // 増減の段階の色（ダーク・ライトのどちらのスキンでも読める控えめな色）
+        private static Color LevelColor(PolygonChangeLevel level)
+        {
+            bool dark = EditorGUIUtility.isProSkin;
+            switch (level)
+            {
+                case PolygonChangeLevel.Large:
+                    return dark ? new Color(0.96f, 0.45f, 0.40f) : new Color(0.70f, 0.13f, 0.10f);
+                case PolygonChangeLevel.Medium:
+                    return dark ? new Color(0.93f, 0.78f, 0.30f) : new Color(0.55f, 0.40f, 0.00f);
+                default:
+                    return dark ? new Color(0.45f, 0.82f, 0.48f) : new Color(0.10f, 0.45f, 0.16f);
+            }
         }
 
         // subMeshEnabled の長さをサブメッシュ数に合わせる（空から広げるときはテクスチャを持つサブメッシュを対象に、途中から広げるときは対象にする）

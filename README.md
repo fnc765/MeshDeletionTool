@@ -15,7 +15,7 @@ NDMF（Non-Destructive Modular Framework）に対応しており、対象のオ�
 * **[Yoridori Modifiers](https://yoridrill.booth.pm/items/8189252)**（ヨリドリガレージ 氏、無料）
   VRChat アバター向けの非破壊編集ツール群で、コンポーネントを付けるだけでアバターのアップロード時に処理が実行されます。メッシュの削除（トリミング）のほか、VRoid のなで肩調整や Quest 対応に関わる複数のツールが含まれ、右クリックメニューから VRoid 向けの初期値で追加できます。
 
-こちらのツールの方が継続的に配布・更新されており、利用者も多いため、日常的な用途にはそちらを使ってください。
+日常的な用途には、配布物として整えられているこちらのツールを使うことをお勧めします。
 本リポジトリのコードも動作しますが、公開時点の状態で保守しており、下の「既知の制限・未対応」に挙げた問題は未修正です。
 
 # 何ができるか
@@ -215,7 +215,7 @@ Copyright (c) 2024-2026 おちょこ (fnc765)
 # English summary
 
 MeshDeletionTool is a Unity editor extension that cuts a mesh along the alpha outline of its texture and deletes the transparent part, for platforms without transparent shaders (VRChat Quest avatars made with VRoid).
-It is published as a reference implementation. For everyday use we recommend [Yoridori Modifiers](https://yoridrill.booth.pm/items/8189252) (Yoridori Garage, free on BOOTH), a maintained set of non-destructive VRChat avatar tools that includes mesh trimming.
+It is published as a reference implementation. For everyday use we recommend [Yoridori Modifiers](https://yoridrill.booth.pm/items/8189252) (Yoridori Garage, free on BOOTH), a set of non-destructive VRChat avatar tools that includes mesh trimming.
 What the code does: classifies vertices by texture alpha, bisects the alpha boundary on every crossing edge, adaptively refines triangles near the boundary, merges the cut back into one polygon per original triangle and simplifies the cut chain (Douglas–Peucker), and interpolates every vertex attribute (normals, tangents, colors, UV0–7, bone weights, blend shapes) for the new vertices.
 The per-element stages run on a Compute Shader when available and on the CPU otherwise, written line for line from the same formulas.
 Texture alpha is read through the GPU (Blit + ReadPixels), so import settings are left untouched.

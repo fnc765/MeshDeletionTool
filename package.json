@@ -1,0 +1,15 @@
+{
+    "name": "com.ochoco.mesh-deletion-tool",
+    "displayName": "MeshDeletionTool",
+    "version": "0.1.0",
+    "unity": "2022.3",
+    "description": "テクスチャの透明部分に合わせてメッシュを削るツール。MeshDeletionForTexture コンポーネントを付けたオブジェクトのメッシュを、NDMF によりプレイ時・アップロード時に非破壊で置き換える。",
+    "author": {
+        "name": "おちょこ",
+        "url": "https://twitter.com/ochoco0215"
+    },
+    "license": "MIT",
+    "vpmDependencies": {
+        "nadena.dev.ndmf": ">=1.8.0"
+    }
+}

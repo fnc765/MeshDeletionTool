@@ -1,0 +1,34 @@
+{
+    "name": "MeshDeletionTool.Editor",
+    "rootNamespace": "MeshDeletionTool",
+    "references": [
+        "MeshDeletionTool.Runtime",
+        "nadena.dev.ndmf",
+        "nadena.dev.ndmf.runtime"
+    ],
+    "includePlatforms": [
+        "Editor"
+    ],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": true,
+    "precompiledReferences": [
+        "System.Collections.Immutable.dll",
+        "VRCSDKBase.dll"
+    ],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [
+        {
+            "name": "com.vrchat.avatars",
+            "expression": "",
+            "define": "VRC_SDK_VRCSDK3"
+        },
+        {
+            "name": "nadena.dev.ndmf",
+            "expression": "1.8.0",
+            "define": "NDMF"
+        }
+    ],
+    "noEngineReferences": false
+}

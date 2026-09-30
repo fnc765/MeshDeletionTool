@@ -6,54 +6,63 @@ namespace MeshDeletionTool
 {
     public static class BoneWeightUtils
     {
+        // 2つのボーンウェイトを重み t で線形補間する（t = 0 で bw1、t = 1 で bw2 をそのまま返す）
+        // 同じボーンのウェイトは合算し、大きい順に最大4つを残して合計が1になるよう正規化する
         public static BoneWeight LerpBoneWeight(BoneWeight bw1, BoneWeight bw2, float t)
         {
-            // 初期化
-            BoneWeight result = new BoneWeight();
+            t = Mathf.Clamp01(t);
+            if (t <= 0f)
+            {
+                return bw1;
+            }
+            if (t >= 1f)
+            {
+                return bw2;
+            }
 
             // ボーンインデックスとウェイトを対応付けするための辞書を作成
             Dictionary<int, float> boneWeightDict = new Dictionary<int, float>();
 
-            // bw1のボーンインデックスとウェイトを辞書に追加
-            AddBoneWeightToDict(boneWeightDict, bw1.boneIndex0, bw1.weight0);
-            AddBoneWeightToDict(boneWeightDict, bw1.boneIndex1, bw1.weight1);
-            AddBoneWeightToDict(boneWeightDict, bw1.boneIndex2, bw1.weight2);
-            AddBoneWeightToDict(boneWeightDict, bw1.boneIndex3, bw1.weight3);
+            // bw1のボーンインデックスとウェイトを (1 - t) 倍して辞書に追加
+            AddBoneWeightToDict(boneWeightDict, bw1.boneIndex0, bw1.weight0 * (1f - t));
+            AddBoneWeightToDict(boneWeightDict, bw1.boneIndex1, bw1.weight1 * (1f - t));
+            AddBoneWeightToDict(boneWeightDict, bw1.boneIndex2, bw1.weight2 * (1f - t));
+            AddBoneWeightToDict(boneWeightDict, bw1.boneIndex3, bw1.weight3 * (1f - t));
 
-            // bw2のボーンインデックスとウェイトを辞書に追加（既存のインデックスなら加算）
-            AddBoneWeightToDict(boneWeightDict, bw2.boneIndex0, bw2.weight0);
-            AddBoneWeightToDict(boneWeightDict, bw2.boneIndex1, bw2.weight1);
-            AddBoneWeightToDict(boneWeightDict, bw2.boneIndex2, bw2.weight2);
-            AddBoneWeightToDict(boneWeightDict, bw2.boneIndex3, bw2.weight3);
+            // bw2のボーンインデックスとウェイトを t 倍して辞書に追加（既存のインデックスなら加算）
+            AddBoneWeightToDict(boneWeightDict, bw2.boneIndex0, bw2.weight0 * t);
+            AddBoneWeightToDict(boneWeightDict, bw2.boneIndex1, bw2.weight1 * t);
+            AddBoneWeightToDict(boneWeightDict, bw2.boneIndex2, bw2.weight2 * t);
+            AddBoneWeightToDict(boneWeightDict, bw2.boneIndex3, bw2.weight3 * t);
 
-            // 補間後のボーンウェイトを設定するためのリストを作成
+            // ウェイトの大きい順（同じならボーンインデックスの小さい順）に最大4つを残す
             var interpolatedWeights = boneWeightDict
-                .Select(pair => new { pair.Key, Weight = Mathf.Lerp(0, pair.Value, t) })
-                .Where(x => x.Weight > 0)
-                .OrderByDescending(x => x.Weight)
+                .OrderByDescending(pair => pair.Value)
+                .ThenBy(pair => pair.Key)
                 .Take(4) // ボーンウェイトは最大4つまで
                 .ToList();
 
-            // ボーンインデックスとウェイトを結果に設定
+            // ボーンインデックスとウェイトを結果に設定（両方とも空なら全て0のまま）
+            BoneWeight result = new BoneWeight();
             for (int i = 0; i < interpolatedWeights.Count; i++)
             {
                 switch (i)
                 {
                     case 0:
                         result.boneIndex0 = interpolatedWeights[i].Key;
-                        result.weight0 = interpolatedWeights[i].Weight;
+                        result.weight0 = interpolatedWeights[i].Value;
                         break;
                     case 1:
                         result.boneIndex1 = interpolatedWeights[i].Key;
-                        result.weight1 = interpolatedWeights[i].Weight;
+                        result.weight1 = interpolatedWeights[i].Value;
                         break;
                     case 2:
                         result.boneIndex2 = interpolatedWeights[i].Key;
-                        result.weight2 = interpolatedWeights[i].Weight;
+                        result.weight2 = interpolatedWeights[i].Value;
                         break;
                     case 3:
                         result.boneIndex3 = interpolatedWeights[i].Key;
-                        result.weight3 = interpolatedWeights[i].Weight;
+                        result.weight3 = interpolatedWeights[i].Value;
                         break;
                 }
             }
